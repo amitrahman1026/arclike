@@ -367,6 +367,10 @@ async function handleArcImport(request) {
 				importedAt: new Date().toISOString() } });
 			log("Arc import: " + JSON.stringify(Object.assign({}, result, { openedTabs: result.openedTabs.length })));
 		}
+		// What Arc's command bar learned, so Arclike's bar ranks the same pages first.
+		await rankMemoryLoaded;
+		var choices = rankFromArcPicks(data.rankingPicks || []);
+		result.choicesAdded = rankImport(choices, dryRun);
 		var response = { ok: true, dryRun: dryRun, summary: summary, result: result, extensions: data.extensions || [] };
 		if (result.failed.length) {
 			context.step = "adding single pages to Chrome";

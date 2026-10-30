@@ -3,7 +3,7 @@
   "name": "Arclike",
   "short_name": "Arclike",
   "description": "Arc-style tab switching for Chrome: a Ctrl+Tab switcher of recent tabs and a Cmd+T / Cmd+L command bar. Needs the Arclike Mac app.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1fS4FSNflmAW7P/aap/fVNMjnH4vJxiGhoAqRRR8b/OWDKFxKOgymierLJRBq492IQXfwp4fzhBQ6z7OKFfg5t+f1MRTGe//azipWPpFoYhJXRqR2dXsSYmSxySDvygsJKzhTTJsXpmWlLhSVmlFNAAi9LLoiXi3HVbDdDULwoemya7vAePW3ym6JWNO0On8XCMbi7lvMBujO0gN6q+Iq2NlZXVf3NDVnJd7XYjHkYMwsjnoTKQXfJfsBAONdNJICNEBpDiFGrxxpXa8Ev7Y2p7sog6zj9iKUelIC3uwUiF+pGgv9yvW5HX1GTg5OPDi/q+snLDAnI1TFPJJDIfqfQIDAQAB",
   "permissions": [
     "tabs",

@@ -4,14 +4,16 @@ const fs = require('fs');
 const vm = require('vm');
 const path = require('path');
 
-const SRC = path.join(__dirname, '..', 'extension', 'mainsw.js');
+const EXTENSION = path.join(__dirname, '..', 'extension');
 
 function makeEvent() {
   const listeners = [];
   return { addListener: (fn) => listeners.push(fn), emit: (...a) => listeners.forEach(fn => fn(...a)), listeners };
 }
 
+// `opts.dir` loads the extension from another folder, such as an older copy to compare with.
 function load(opts = {}) {
+  const dir = opts.dir || EXTENSION;
   let port = null;               // the native messaging port the worker opened
   const sent = [];               // messages sent to the native host
   const activated = [];          // chrome.tabs.update calls
@@ -108,7 +110,7 @@ function load(opts = {}) {
       arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer, headers: { get: () => 'image/png' } }),
     // Scripts the worker imports run in its own context, as they do in a service worker.
     importScripts: (...files) => files.forEach(f =>
-      vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'extension', f), 'utf8'), ctx, { filename: f })),
+      vm.runInContext(fs.readFileSync(path.join(dir, f), 'utf8'), ctx, { filename: f })),
     setTimeout, clearTimeout, setInterval: () => 0, clearInterval,
     Date, Math, JSON, Map, Set, Promise, Object, Array, String, Number, RegExp, Error, undefined,
     createImageBitmap: async () => ({ width: 2000, height: 1200, close: () => {} }),
@@ -121,7 +123,7 @@ function load(opts = {}) {
   };
   sandbox.globalThis = sandbox;
   const ctx = vm.createContext(sandbox);
-  vm.runInContext(fs.readFileSync(SRC, 'utf8'), ctx, { filename: 'mainsw.js' });
+  vm.runInContext(fs.readFileSync(path.join(dir, 'mainsw.js'), 'utf8'), ctx, { filename: 'mainsw.js' });
 
   const h = {
     ctx, sandbox, chrome, sent, activated, windowsFocused, created, searched, ran, state, session, local,

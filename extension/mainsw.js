@@ -4,6 +4,7 @@
  * (github.com/nechemyaspitz/tab-switcher).
  */
 
+importScripts("ranking.js");
 importScripts("commandbar.js");
 importScripts("littlearc.js");
 importScripts("arcimport.js");

@@ -203,17 +203,90 @@ test('each row says what the field shows while it is selected', async () => {
   assert.deepStrictEqual(results.map(r => r.fill), ['netflix.com/browse', 'netf']);
 });
 
+// The score of a page for `query`, as the bar ranks it.
+function score(h, query, kind, item) {
+  h.set('__item', item);
+  return h.call(`rankScore(rankFeatures(${JSON.stringify(query)}, "${kind}", __item, __item.title, __item.url, false, {}))`);
+}
+
 test('a page visited an hour ago outranks one visited a week ago', () => {
   const h = load();
-  const hour = h.call(`commandBarHistoryBonus({ visitCount: 5, lastVisitTime: Date.now() - 3600000 })`);
-  const week = h.call(`commandBarHistoryBonus({ visitCount: 5, lastVisitTime: Date.now() - 7 * 86400000 })`);
-  assert.ok(hour > week + 10, hour + ' vs ' + week);
+  const page = { url: 'https://example.com/a', title: 'Example', visitCount: 5 };
+  const hour = score(h, 'exa', 'history', Object.assign({ lastVisitTime: Date.now() - 3600000 }, page));
+  const week = score(h, 'exa', 'history', Object.assign({ lastVisitTime: Date.now() - 7 * DAY }, page));
+  assert.ok(hour > week, hour + ' vs ' + week);
 });
 
-test('a page visited thousands of times does not outrank an open tab', () => {
+test('a page visited thousands of times does not outrank an open tab that matches as well', () => {
   const h = load();
-  const most = h.call(`commandBarHistoryBonus({ visitCount: 100000, typedCount: 100, lastVisitTime: Date.now() })`);
-  assert.ok(most < h.g('COMMAND_BAR_TAB_BONUS'), String(most));
+  const most = score(h, 'exa', 'history', { url: 'https://example.com/a', title: 'Example',
+    visitCount: 100000, typedCount: 100, lastVisitTime: Date.now() });
+  const tab = score(h, 'exa', 'tab', { url: 'https://example.com/b', title: 'Example' });
+  assert.ok(most < tab, most + ' vs ' + tab);
+});
+
+// Choose `item` for the typed `text`, the way the app reports a choice.
+async function choose(h, text, item) {
+  await query(h, text);
+  await h.call(`commandBarChoose(${JSON.stringify({ text, item })})`);
+  await h.call('commandBarOpen("new_tab")');
+}
+
+test('a page chosen for some text leads the next time that text is typed, and is saved', async () => {
+  const h = browser({ history: [
+    { url: 'https://github.com/me/arclike', title: 'me/arclike', visitCount: 2, lastVisitTime: Date.now() - DAY },
+    { url: 'https://github.com/', title: 'GitHub', visitCount: 90, lastVisitTime: Date.now() },
+  ] });
+  await h.call('commandBarOpen("new_tab")');
+  assert.strictEqual((await query(h, 'gi'))[0].url, 'https://github.com/', 'the site leads at first');
+  await choose(h, 'gi', { kind: 'history', title: 'me/arclike', url: 'https://github.com/me/arclike' });
+  assert.strictEqual((await query(h, 'gi'))[0].url, 'https://github.com/me/arclike');
+  assert.deepStrictEqual(h.local.commandBarMemory.map(e => [e.text, e.url]), [['gi', 'https://github.com/me/arclike']]);
+});
+
+test('searching the typed text, once chosen, keeps the search row first', async () => {
+  const h = browser();
+  await h.call('commandBarOpen("new_tab")');
+  assert.strictEqual((await query(h, 'netf'))[0].kind, 'tab');
+  await choose(h, 'netf', { kind: 'search', title: 'netf', text: 'netf' });
+  assert.deepStrictEqual(kinds(await query(h, 'netf')).slice(0, 2), ['search:netf', 'tab:https://www.netflix.com/browse']);
+});
+
+test('a past search that starts with the query is offered after the search row', async () => {
+  const h = browser();
+  await h.call('commandBarOpen("new_tab")');
+  await choose(h, 'black vs', { kind: 'search', title: 'black vs green cardamom', text: 'black vs green cardamom' });
+  assert.deepStrictEqual(kinds(await query(h, 'black')), ['search:black', 'search:black vs green cardamom']);
+});
+
+// Arc counts time in seconds from 2001.
+const APPLE_EPOCH = Date.UTC(2001, 0, 1);
+
+test('a page chosen in Arc is remembered with its time, and Arc\'s own commands are not', () => {
+  const h = load();
+  const entries = h.call(`rankFromArcPicks(${JSON.stringify([
+    { query: 'Trans', type: 'chromiumHistory', url: 'https://translate.google.com/', title: 'Google Translate', selectedAt: 814004476 },
+    { query: 'black vs green ca', type: 'chromiumSearchSuggestion', search: 'black vs green cardamom', selectedAt: 813583485 },
+    { query: 'github.com', type: 'chromiumNavigateWhatYouTyped', url: 'https://github.com/', selectedAt: 813583485 },
+    { query: 'shortcu', type: 'typeTravel', selectedAt: 813583485 },
+  ])})`);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(entries)), [
+    { text: 'trans', at: APPLE_EPOCH + 814004476000, count: 1, url: 'https://translate.google.com/', title: 'Google Translate' },
+    { text: 'black vs green ca', at: APPLE_EPOCH + 813583485000, count: 1, search: 'black vs green cardamom' },
+  ]);
+});
+
+test('of two tabs that match alike, the one switched to more lately ranks first', async () => {
+  const h = load({ windows: [win(1, [
+    tab(1, { active: true }),
+    tab(2, { url: 'https://docs.example/a', title: 'Notes A' }),
+    tab(3, { url: 'https://docs.example/b', title: 'Notes B' }),
+  ], true)] });
+  h.set('mru', [1, 3, 2]);
+  await h.call('commandBarOpen("new_tab")');
+  assert.deepStrictEqual((await query(h, 'notes')).filter(r => r.kind === 'tab').map(r => r.tabId), [3, 2]);
+  h.set('mru', [1, 2, 3]);
+  assert.deepStrictEqual((await query(h, 'notes')).filter(r => r.kind === 'tab').map(r => r.tabId), [2, 3]);
 });
 
 test('a typo still finds the page, below the search row', async () => {

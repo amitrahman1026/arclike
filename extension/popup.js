@@ -248,8 +248,9 @@ function arcPreview() {
     var s = response.summary, r = response.result;
     var text = plural(s.spaces, "space") + ": " + plural(s.pages, "pinned page") + ", " +
       plural(s.tabs, "open tab") + ", " + plural(s.favorites, "favorite");
+    if (r.choicesAdded) text += ", " + plural(r.choicesAdded, "command bar choice");
     arcShowTree(s, r);
-    if (!r.pagesAdded && !r.foldersAdded && !r.favoritesAdded && !r.tabsAdded) {
+    if (!r.pagesAdded && !r.foldersAdded && !r.favoritesAdded && !r.tabsAdded && !r.choicesAdded) {
       arcShow(text, "Everything from Arc is already in Chrome.");
       arcShowChecklist(response.extensions);
       arcSetButtons([{ label: "Close", onClick: arcReset }]);
@@ -277,6 +278,7 @@ function arcImport() {
     var r = response.result;
     var text = "Added " + plural(r.pagesAdded, "bookmark") + ", opened " + plural(r.tabsAdded, "tab") +
       " in " + plural(r.groupsAdded, "new tab group") + ", and pinned " + plural(r.favoritesAdded, "favorite") + ".";
+    if (r.choicesAdded) text += " The command bar now knows " + plural(r.choicesAdded, "choice") + " you made in Arc.";
     if (r.failed.length) {
       arcShow(text + " " + plural(r.failed.length, "page") + " could not be added.",
         "Click Copy details and paste it into Claude Code to get it fixed.");

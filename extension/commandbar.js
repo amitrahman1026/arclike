@@ -7,10 +7,8 @@
 var COMMAND_BAR_MAX_RESULTS = 8;
 var COMMAND_BAR_TOP_SITES = 6;
 var COMMAND_BAR_MAX_FAVICONS = 500;
-// A match at least this good is put above the search row, so Enter goes straight to it: a host
-// that starts with the query, or an open tab whose title starts with it.
-var COMMAND_BAR_STRONG_HOST_MATCH = 100;
-var COMMAND_BAR_STRONG_TAB_MATCH = 60;
+// A command whose name starts with the query scores this, and leads when no page does.
+var COMMAND_BAR_STRONG_COMMAND_MATCH = 60;
 
 // The bar on screen: the window it opened over, the tab Cmd+L would replace, and whether the
 // choice opens in a new tab ("new_tab") or in that tab ("current_tab").
@@ -29,6 +27,7 @@ var commandBarHistoryWaited = false;
 // The newest query the app sent. An older one still in flight is dropped rather than answered.
 var commandBarLatestSeq = 0;
 var commandBarClosedCount = 0;   // recently closed tabs seen by the last search, for the trace
+var commandBarLastQuery = "";    // what was typed for the newest answer, remembered with the choice
 
 var COMMAND_BAR_SCHEMES = /^(https?|file|ftp|chrome|chrome-extension|about|view-source):/i;
 
@@ -186,12 +185,6 @@ var commandBarFuzzyScore = function(query, item, title, url) {
 	return COMMAND_BAR_FUZZY_SCORE;
 };
 
-// Pages visited lately, often or by typing their address rank higher. Recency halves every
-// day. Frequency grows with the logarithm of the visit count and stops at 100 visits, so a page
-// opened thousands of times does not bury everything else. The most a page can get stays below
-// an open tab's bonus, so an open tab wins a tie.
-var COMMAND_BAR_TAB_BONUS = 45;
-var COMMAND_BAR_CLOSED_BONUS = 35;
 // A tab closed this recently is what you are most likely after, so it comes before every other
 // page that matches, whatever their titles score.
 var COMMAND_BAR_FRESH_CLOSED_MINUTES = 10;
@@ -199,16 +192,6 @@ var COMMAND_BAR_FRESH_CLOSED_MINUTES = 10;
 var commandBarFreshlyClosed = function(candidate) {
 	return candidate.kind === "closed" &&
 		Date.now() / 1000 - (candidate.lastModified || 0) < COMMAND_BAR_FRESH_CLOSED_MINUTES * 60;
-};
-var COMMAND_BAR_BOOKMARK_BONUS = 25;
-var COMMAND_BAR_RECENCY_HALF_LIFE_HOURS = 24;
-
-var commandBarHistoryBonus = function(item) {
-	var ageHours = Math.max(0, (Date.now() - (item.lastVisitTime || 0)) / (60 * 60 * 1000));
-	var recency = item.lastVisitTime ? Math.pow(0.5, ageHours / COMMAND_BAR_RECENCY_HALF_LIFE_HOURS) : 0;
-	var frequency = Math.min(1, Math.log1p(item.visitCount || 0) / Math.log1p(100));
-	var typed = Math.min(8, (item.typedCount || 0) * 2);
-	return 15 * recency + 20 * frequency + typed;
 };
 
 var commandBarSearchRow = function(text) {
@@ -403,7 +386,7 @@ var commandBarMatchingCommands = function(text, target) {
 		if (!allWords) {
 			return;
 		}
-		var match = commandBarWordStart(lowerTitle, text.toLowerCase()) === 0 ? 60 : 30;
+		var match = commandBarWordStart(lowerTitle, text.toLowerCase()) === 0 ? COMMAND_BAR_STRONG_COMMAND_MATCH : 30;
 		var row = { kind: "command", title: title, detail: "", hint: commandBarHint(definition.hint),
 			symbol: definition.symbol, match: match };
 		if (definition.url) {
@@ -425,26 +408,37 @@ var COMMAND_BAR_FUZZY_BELOW = 3;
 
 // Rank open tabs, recently closed tabs, bookmarks and history for the query and put the typed
 // text's own row (open the URL, or search) among them. A page that is in several sources is
-// listed once, as an open tab first, then as a closed tab, then as a bookmark.
+// listed once, as an open tab first, then as a closed tab, then as a bookmark. `sources.context`
+// is what ranking.js needs beyond the pages: `switched`, `recalled` (from rankRecall) and `now`.
 var COMMAND_BAR_HINTS = { tab: "Switch to Tab", closed: "Closed", bookmark: "Bookmark" };
+// A search you made before that starts with the query, listed after the search row.
+var COMMAND_BAR_PAST_SEARCHES = 1;
 
 var commandBarRank = function(query, sources) {
 	var text = query.trim();
+	var context = sources.context || {};
+	var recalled = context.recalled || { pages: new Map(), searches: [], searchHere: 0 };
+	context = Object.assign({}, context, { remembered: new Map(Array.from(recalled.pages, function(entry) {
+		return [entry[0], entry[1].strength];
+	})) });
 	var candidates = [];
 	var byKey = new Map();
 	var fuzzy = false;
-	var add = function(kind, item, title, url, bonus, extra) {
+	var add = function(kind, item, title, url, extra, always) {
 		if (!url || /^javascript:/i.test(url)) {
 			return;
 		}
-		var match = fuzzy ? commandBarFuzzyScore(text, item, title, url) : commandBarMatchScore(text, title, url);
-		if (match < 0) {
+		var key = commandBarUrlKey(url);
+		var match = always ? 0 :
+			fuzzy ? commandBarFuzzyScore(text, item, title, url) : commandBarMatchScore(text, title, url);
+		if (match < 0 && !context.remembered.has(key)) {
 			return;
 		}
-		var key = commandBarUrlKey(url);
+		var features = rankFeatures(text, kind, item, title, url, fuzzy && match >= 0, context);
 		var existing = byKey.get(key);
 		if (existing) {
-			existing.score = Math.max(existing.score, match + bonus);
+			rankMergeFeatures(existing.features, features);
+			existing.score = rankScore(existing.features);
 			return;
 		}
 		var candidate = Object.assign({
@@ -454,25 +448,24 @@ var commandBarRank = function(query, sources) {
 			hint: COMMAND_BAR_HINTS[kind] || "",
 			url: url,
 			key: key,
-			match: match,
-			score: match + bonus
+			features: features,
+			score: rankScore(features)
 		}, extra);
 		byKey.set(key, candidate);
 		candidates.push(candidate);
 	};
 	var addAll = function() {
 		(sources.tabs || []).forEach(function(tab) {
-			add("tab", tab, tab.title, tab.url, COMMAND_BAR_TAB_BONUS, { tabId: tab.id });
+			add("tab", tab, tab.title, tab.url, { tabId: tab.id });
 		});
 		(sources.closed || []).forEach(function(tab) {
-			add("closed", tab, tab.title, tab.url, COMMAND_BAR_CLOSED_BONUS,
-				{ sessionId: tab.sessionId, lastModified: tab.lastModified });
+			add("closed", tab, tab.title, tab.url, { sessionId: tab.sessionId, lastModified: tab.lastModified });
 		});
 		(sources.bookmarks || []).forEach(function(bookmark) {
-			add("bookmark", bookmark, bookmark.title, bookmark.url, COMMAND_BAR_BOOKMARK_BONUS);
+			add("bookmark", bookmark, bookmark.title, bookmark.url);
 		});
 		(sources.history || []).forEach(function(item) {
-			add("history", item, item.title, item.url, commandBarHistoryBonus(item));
+			add("history", item, item.title, item.url);
 		});
 	};
 	addAll();
@@ -480,6 +473,12 @@ var commandBarRank = function(query, sources) {
 		fuzzy = true;
 		addAll();
 	}
+	// A page chosen before for this text is offered even when history no longer has it.
+	recalled.pages.forEach(function(page) {
+		if (!byKey.has(commandBarUrlKey(page.url))) {
+			add("history", {}, page.title, page.url, {}, true);
+		}
+	});
 	candidates.sort(function(a, b) {
 		return commandBarFreshlyClosed(b) - commandBarFreshlyClosed(a) || b.score - a.score;
 	});
@@ -497,16 +496,22 @@ var commandBarRank = function(query, sources) {
 		}
 	} else {
 		var best = candidates[0];
-		var strong = best && text.length >= 2 && (best.match >= COMMAND_BAR_STRONG_HOST_MATCH ||
-			((best.kind === "tab" || commandBarFreshlyClosed(best)) && best.match >= COMMAND_BAR_STRONG_TAB_MATCH));
+		// A page leads when it scores high enough and the query starts its site's name or a word of
+		// its title, or it was chosen for this text before. Not when searching this very text was
+		// chosen more strongly before. A tab closed a moment ago leads when its site or title starts
+		// with the query.
+		var named = best && (best.features.host || best.features.title || best.features.remembered);
+		var strong = best && text.length >= 2 && recalled.searchHere <= best.features.remembered &&
+			((named && best.score >= RANK_LEAD) ||
+				(commandBarFreshlyClosed(best) && Math.max(best.features.host, best.features.title) >= 1));
 		// A command whose name starts with the query leads when no page does: "set" is Settings.
-		if (!strong && commands.length && commands[0].match >= COMMAND_BAR_STRONG_TAB_MATCH && text.length >= 3) {
+		if (!strong && commands.length && commands[0].match >= COMMAND_BAR_STRONG_COMMAND_MATCH && text.length >= 3) {
 			results.push(commands.shift());
 		}
 		if (strong) {
 			// A site name leads with the site itself, unless a tab, open or just closed, has a page
-			// of it.
-			var site = best.kind !== "tab" && best.kind !== "closed" &&
+			// of it, or this very page was chosen for the text before.
+			var site = best.kind !== "tab" && best.kind !== "closed" && !best.features.remembered &&
 				commandBarHost(best.url).indexOf(text.toLowerCase()) === 0 ?
 				commandBarSiteRow(best.url) : best;
 			results.push(site);
@@ -514,6 +519,9 @@ var commandBarRank = function(query, sources) {
 			candidates = candidates.filter(function(c) { return c === site || c.key !== siteKey; });
 		}
 		results.push(commandBarSearchRow(text));
+		recalled.searches.slice(0, COMMAND_BAR_PAST_SEARCHES).forEach(function(search) {
+			results.push(commandBarSearchRow(search.text));
+		});
 	}
 	// Other commands come right after the typed text's own rows, at most two of them.
 	commands.slice(0, 2).forEach(function(command) {
@@ -621,6 +629,13 @@ var commandBarClosedTabs = async function() {
 	}
 };
 
+// How lately you switched to a tab: 1 for the tab you were on before this one, then 1/2, 1/3...
+// by Ctrl+Tab order (`mru` in mainsw.js). The tab you are on is first in that order.
+var commandBarSwitched = function(tabId) {
+	var index = typeof mru === "undefined" ? -1 : mru.indexOf(tabId);
+	return index > 0 ? 1 / index : 0;
+};
+
 var commandBarSearch = async function(query) {
 	var results;
 	if (commandBarTarget && commandBarTarget.pick) {
@@ -654,6 +669,7 @@ var commandBarSearch = async function(query) {
 		// The tab the bar opened over is where you already are.
 		var hereTabId = commandBarTarget ? commandBarTarget.tabId : null;
 		results = commandBarRank(query, {
+			context: { now: Date.now(), recalled: rankRecall(query), switched: commandBarSwitched },
 			tabs: found[0].filter(function(tab) { return tab.id !== hereTabId; }),
 			closed: found[2],
 			bookmarks: found[1].filter(function(bookmark) { return bookmark.url; }),
@@ -709,6 +725,7 @@ var commandBarOpen = async function(mode) {
 		log("CommandBar::No focused window in this profile - ignoring");
 		return;
 	}
+	await rankMemoryLoaded;
 	var tabs = await chrome.tabs.query({ active: true, windowId: win.id });
 	commandBarShowFor(mode, win, tabs[0]);
 };
@@ -726,6 +743,7 @@ var commandBarShowFor = function(mode, win, active) {
 	if (win.type === "popup") {
 		commandBarTarget.littleArc = true;
 	}
+	commandBarLastQuery = "";
 	var text = "";
 	if (mode === "current_tab" && active && !/^(chrome:\/\/newtab\/?|about:blank)$/.test(active.url || "")) {
 		text = active.url || "";
@@ -750,6 +768,7 @@ var commandBarQuery = async function(message) {
 	if (message.seq < commandBarLatestSeq) {
 		return;
 	}
+	commandBarLastQuery = query;
 	var picking = Boolean(commandBarTarget && commandBarTarget.pick);
 	var autocomplete = query.trim() && !picking ? commandBarAutocomplete(query, results[0]) : "";
 	var reply = { action: "command_bar_results", seq: message.seq, results: results, autocomplete: autocomplete };
@@ -784,6 +803,9 @@ var commandBarChoose = async function(message) {
 	var text = (message.text || "").trim();
 	var item = message.item || (text ? commandBarDefaultRow(text) : null);
 	commandBarRetireUsedTip(item);
+	if (!target.pick) {
+		rankRemember(commandBarLastQuery, item);
+	}
 	var newTab = target.mode === "new_tab";
 	littleArcCommandBarOpening();
 	try {

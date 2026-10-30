@@ -377,6 +377,31 @@ test('the import stores the folder and opened tabs so the next one finds them', 
   assert.strictEqual(response.report, undefined, 'no report when nothing failed');
 });
 
+test('Arc\'s command bar choices are counted in the preview, remembered by the import, and not twice', async () => {
+  const h = load();
+  withFakes(h, fakeChrome());
+  const picks = [
+    { query: 'gi', type: 'chromiumHistory', url: 'https://github.com/me', title: 'me', selectedAt: 800000000 },
+    { query: 'juice brands', type: 'chromiumSearchWhatYouTyped', search: 'juice brands', selectedAt: 800000100 },
+    { query: 'shortcu', type: 'typeTravel', selectedAt: 800000200 },
+  ];
+  const run = async (dryRun) => {
+    const reply = popupRequest(h, { action: 'arc_import', dryRun });
+    const asked = await untilSent(h, 'read_arc');
+    h.sent.length = 0;
+    await h.deliver(Object.assign({ action: 'arc_data', requestId: asked.requestId, ok: true, sidebar: sidebar(),
+      rankingPicks: picks }, APP_INFO));
+    return reply;
+  };
+  assert.strictEqual((await run(true)).result.choicesAdded, 2, 'a choice with no page and no search is left out');
+  assert.deepStrictEqual(h.g('rankMemory'), [], 'a preview remembers nothing');
+  assert.strictEqual((await run(false)).result.choicesAdded, 2);
+  assert.deepStrictEqual(h.g('rankMemory').map(e => [e.text, e.url || e.search]),
+    [['gi', 'https://github.com/me'], ['juice brands', 'juice brands']]);
+  assert.strictEqual((await run(false)).result.choicesAdded, 0);
+  assert.strictEqual(h.g('rankMemory.length'), 2);
+});
+
 test('an app error comes back with a report to paste into Claude Code', async () => {
   const h = load();
   const reply = popupRequest(h, { action: 'arc_import', dryRun: true });
