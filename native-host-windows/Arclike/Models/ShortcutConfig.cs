@@ -1,5 +1,4 @@
 using System.Text.Json.Serialization;
-using System.Windows.Input;
 
 namespace Arclike.Models
 {
@@ -80,16 +79,20 @@ namespace Arclike.Models
     public class ShortcutsConfiguration
     {
         [JsonPropertyName("tabSwitch")]
-        public ShortcutConfig TabSwitch { get; set; } = Defaults.TabSwitch;
+        public ShortcutConfig TabSwitch { get; set; } = DefaultTabSwitch();
 
         [JsonPropertyName("copyUrl")]
-        public ShortcutConfig CopyUrl { get; set; } = Defaults.CopyUrl;
+        public ShortcutConfig CopyUrl { get; set; } = DefaultCopyUrl();
 
-        public static ShortcutsConfiguration Defaults => new()
-        {
-            TabSwitch = new ShortcutConfig { VkCode = 0x09, Modifiers = ModifierKeysFlag.Control }, // Ctrl+Tab
-            // Alt+Shift+C. Ctrl+Shift+C is Chrome's "inspect element" on Windows.
-            CopyUrl = new ShortcutConfig { VkCode = 0x43, Modifiers = ModifierKeysFlag.Alt | ModifierKeysFlag.Shift }
-        };
+        // The initializers must not use Defaults: it constructs this class, so it would recurse.
+        public static ShortcutsConfiguration Defaults => new();
+
+        // Ctrl+Tab
+        private static ShortcutConfig DefaultTabSwitch() =>
+            new() { VkCode = 0x09, Modifiers = ModifierKeysFlag.Control };
+
+        // Alt+Shift+C. Ctrl+Shift+C is Chrome's "inspect element" on Windows.
+        private static ShortcutConfig DefaultCopyUrl() =>
+            new() { VkCode = 0x43, Modifiers = ModifierKeysFlag.Alt | ModifierKeysFlag.Shift };
     }
 }

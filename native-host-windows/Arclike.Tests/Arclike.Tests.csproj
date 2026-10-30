@@ -11,6 +11,7 @@
   <ItemGroup>
     <Compile Include="..\Arclike\Models\SwitcherLayout.cs" Link="Linked\SwitcherLayout.cs" />
     <Compile Include="..\Arclike\Models\CommandBarItem.cs" Link="Linked\CommandBarItem.cs" />
+    <Compile Include="..\Arclike\Models\ShortcutConfig.cs" Link="Linked\ShortcutConfig.cs" />
   </ItemGroup>
 
   <ItemGroup>
