@@ -4,14 +4,18 @@ $ErrorActionPreference = "Stop"
 $ProbeExe = "C:\arclike\test\probe\Probe.exe"
 $ResultsRoot = "C:\arclike\test\out"
 $TestProfile = "C:\arclike\test\profile"
+$ExtensionId = "jlmidbafifiahhcpahkcejphlibhjapo"
+
+# Start-Process joins the arguments with spaces, so quote any that contain one.
+function Join-Arguments([object[]]$Arguments) {
+    return $Arguments | ForEach-Object { if ("$_" -match '\s') { '"' + $_ + '"' } else { "$_" } }
+}
 
 # The probe is a WinExe, so wait for it explicitly and collect its output from a file.
 function Probe {
     $tmp = [System.IO.Path]::GetTempFileName()
     $err = [System.IO.Path]::GetTempFileName()
-    # Start-Process joins the arguments with spaces, so quote any that contain one.
-    $quoted = $args | ForEach-Object { if ("$_" -match '\s') { '"' + $_ + '"' } else { "$_" } }
-    $p = Start-Process -FilePath $ProbeExe -ArgumentList $quoted -NoNewWindow -Wait -PassThru `
+    $p = Start-Process -FilePath $ProbeExe -ArgumentList (Join-Arguments $args) -NoNewWindow -Wait -PassThru `
         -RedirectStandardOutput $tmp -RedirectStandardError $err
     $output = Get-Content $tmp -Raw
     $errors = Get-Content $err -Raw
@@ -27,11 +31,19 @@ function Get-ChromePath {
     throw "Chrome not found"
 }
 
-# Start Chrome on the test profile, with the given URLs. The extension must already be loaded in
-# that profile (Chrome 137 and later ignore --load-extension). See docs/windows-port.md, 7.3.
+# Start Chrome on the test profile with the extension loaded and the given URLs as tabs. Chrome
+# 137 and later ignore --load-extension, so load-extension.mjs loads it over a DevTools pipe on
+# every start. See docs/windows-port.md, 7.3.
 function Start-TestChrome([string[]]$Urls = @("about:blank")) {
-    $chromeArgs = @("--user-data-dir=$TestProfile", "--no-first-run", "--no-default-browser-check", "--restore-last-session=false") + $Urls
-    Start-Process -FilePath (Get-ChromePath) -ArgumentList $chromeArgs | Out-Null
+    Stop-TestChrome
+    $ready = Join-Path $ResultsRoot "chrome-ready.txt"
+    Remove-Item $ready -ErrorAction SilentlyContinue
+    $nodeArgs = @("C:\arclike\test\node\load-extension.mjs", (Get-ChromePath), $TestProfile, "C:\arclike\src\extension", $ready) + $Urls
+    Start-Process -FilePath "node" -ArgumentList (Join-Arguments $nodeArgs) -NoNewWindow `
+        -RedirectStandardError (Join-Path $ResultsRoot "chrome-node.log") | Out-Null
+    Wait-Until { Test-Path $ready } -TimeoutMs 30000 -What "Chrome to start with the extension"
+    $id = Get-Content $ready -Raw
+    if ($id.Trim() -ne $ExtensionId) { throw "Chrome loaded the extension as $id, not $ExtensionId" }
 }
 
 function Stop-TestChrome {

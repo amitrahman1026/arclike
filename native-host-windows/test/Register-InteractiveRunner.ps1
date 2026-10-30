@@ -8,11 +8,20 @@ New-Item -ItemType Directory -Force -Path (Join-Path $Root "out") | Out-Null
 dotnet publish (Join-Path $PSScriptRoot "Probe\Probe.csproj") -c Release -o (Join-Path $Root "probe")
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish of the probe failed" }
 
+# load-extension.mjs and puppeteer-core start the test Chrome with the extension (lib.ps1).
+$NodeDir = Join-Path $Root "node"
+New-Item -ItemType Directory -Force -Path $NodeDir | Out-Null
+Copy-Item (Join-Path $PSScriptRoot "load-extension.mjs") $NodeDir -Force
+npm install --prefix $NodeDir --no-audit --no-fund puppeteer-core@24.10.0
+if ($LASTEXITCODE -ne 0) { throw "npm install of puppeteer-core failed" }
+
 # The probe is a WinExe and starts PowerShell with no window, so nothing takes the foreground.
 $action = New-ScheduledTaskAction -Execute (Join-Path $Root "probe\Probe.exe") -Argument "run-job `"$Root`""
 # Interactive: run only while the user is logged on, in that session. No password is stored.
-$principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+# Take the account from the token. In an SSH session USERDOMAIN can be WORKGROUP.
+$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+$principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName "ArclikeInteractive" -Action $action -Principal $principal -Settings $settings -Force | Out-Null
-Write-Host "Registered the ArclikeInteractive task for $env:USERDOMAIN\$env:USERNAME"
+Write-Host "Registered the ArclikeInteractive task for $user"
