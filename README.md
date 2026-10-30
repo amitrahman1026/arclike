@@ -43,7 +43,7 @@ The signing identity keeps the Accessibility permission across rebuilds. Without
 <summary>Development</summary>
 
 - Tests: `node --test tests/*.test.cjs`
-- Ranking: `node tools/rank-eval.cjs prepare|run|tune <dir>` scores the command bar against the choices in Arc's command bar. Keep `<dir>` outside the repository: it holds copies of your history.
+- Ranking: [docs/ranking.md](docs/ranking.md) explains how the command bar orders its rows, and how to test the ranking.
 - App log: `~/Library/Logs/Arclike.log`
 - Upstream fixes: `git fetch origin && git merge origin/main`. The `origin` remote is Tab Switcher.
 - The extension ID is always `jlmidbafifiahhcpahkcejphlibhjapo`, because the manifest contains a fixed key.
