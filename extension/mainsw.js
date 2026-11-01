@@ -340,10 +340,14 @@ chrome.tabs.onActivated.addListener(function(activeInfo){
 		// Capture thumbnail of the tab we just switched TO (after a brief delay for render)
 		scheduleThumbnailCapture(activeInfo.tabId, activeInfo.windowId);
 	}
+	chrome.tabs.get(activeInfo.tabId).then(function(tab) { cacheTabFavicon(tab, false); }, function() {});
 });
 
 // Update thumbnail when page finishes loading
 chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
+	if (changeInfo.favIconUrl !== undefined && tab.active) {
+		cacheTabFavicon(tab, true);
+	}
 	if (changeInfo.status === 'complete' && tab.active) {
 		// Page finished loading, capture a fresh thumbnail after a short delay
 		scheduleThumbnailCapture(tabId, tab.windowId);
@@ -642,6 +646,10 @@ var connectNativeHost = function() {
 			
 			if (message.action === "ready") {
 				log("Native host is ready, registering browser: " + browserBundleId);
+				// A new app process counts its command bar queries from 1 again, and any bar the
+				// old one showed is gone with it.
+				commandBarLatestSeq = 0;
+				commandBarClosed();
 				// Register this extension with its browser's bundle ID
 				sendToNativeHost({ action: "register", bundleId: browserBundleId, extensionVersion: EXTENSION_VERSION,
 					features: ["command_bar"] });
@@ -698,6 +706,7 @@ var connectNativeHost = function() {
 			}
 			nativePort = null;
 			nativeHostConnected = false;
+			arcPortClosed();
 			
 			// Try to reconnect after a short delay
 			setTimeout(connectNativeHost, 1000);
@@ -801,11 +810,37 @@ var buildSwitcherTabs = function(windows, focusedWindow) {
 		return {
 			id: id,
 			title: tab.title || 'Untitled',
-			favIconUrl: tab.favIconUrl || '',
+			// Chrome's own favicon as a data URL, so the app never fetches one from the site.
+			favIconUrl: switcherFavicon(tab),
 			thumbnail: tabThumbnails[id] || null,
 			url: tab.url || ''
 		};
 	});
+};
+
+// The favicon a switcher card shows: the one cached from Chrome's _favicon endpoint, or "" until
+// it is cached. The tabs in the switcher are the visited ones, which were cached on activation.
+var switcherFavicon = function(tab) {
+	if (!tab.url) {
+		return '';
+	}
+	var cached = commandBarFavicons.get(commandBarFaviconKey(tab.url));
+	if (cached === undefined) {
+		commandBarFavicon(tab.url);
+		return '';
+	}
+	return cached;
+};
+
+// Read a tab's favicon into the cache, again when `refresh` says the page has a new one.
+var cacheTabFavicon = function(tab, refresh) {
+	if (!tab || !tab.url) {
+		return;
+	}
+	if (refresh) {
+		commandBarFavicons.delete(commandBarFaviconKey(tab.url));
+	}
+	commandBarFavicon(tab.url);
 };
 
 // Check if any window from this profile is currently focused

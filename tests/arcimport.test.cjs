@@ -435,3 +435,13 @@ test('a sidebar in an unknown shape is reported as arc_bad_format', async () => 
   assert.strictEqual(response.error, 'arc_bad_format');
   assert.ok(response.report.includes("Step: reading Arc's sidebar"));
 });
+
+test('an app that closes the connection mid-read fails at once with app_disconnected', async () => {
+  const h = load();
+  const reply = popupRequest(h, { action: 'arc_import', dryRun: true });
+  await untilSent(h, 'read_arc');
+  h.call('nativePort.onDisconnect.emit()');
+  const response = await reply;
+  assert.strictEqual(response.error, 'app_disconnected');
+  assert.deepStrictEqual(h.g('Object.keys(arcRequests)'), []);
+});

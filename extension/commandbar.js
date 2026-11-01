@@ -297,8 +297,18 @@ var COMMAND_BAR_WHEN = {
 	split: function(target) {
 		return typeof chrome.tabs.unsplit === "function" && target.splitViewId !== undefined && target.splitViewId !== -1;
 	},
-	grouped: function(target) { return target.groupId !== undefined && target.groupId !== -1; }
+	grouped: function(target) { return target.groupId !== undefined && target.groupId !== -1; },
+	incognitoOff: function() { return commandBarIncognitoAllowed === false; }
 };
+
+// Whether Chrome lets Arclike into incognito windows. Until it does, the app still takes its keys
+// there, and nothing answers them. Chrome reloads the extension when the setting changes.
+var commandBarIncognitoAllowed = null;
+if (chrome.extension && chrome.extension.isAllowedIncognitoAccess) {
+	chrome.extension.isAllowedIncognitoAccess(function(allowed) {
+		commandBarIncognitoAllowed = Boolean(allowed);
+	});
+}
 
 // Tips: one line at the foot of an empty bar, about a feature you would not find alone. Each
 // time the bar opens empty it shows the next tip. A tip goes for good when you dismiss it or
@@ -311,7 +321,9 @@ var COMMAND_BAR_TIPS = [
 	{ id: "closed-tabs", text: "Type part of a closed tab's title to bring it back", uses: ["closed"] },
 	{ id: "tab-groups", text: "Type `group` to add this tab to a tab group", uses: ["new-tab-group", "add-tab-to-group"] },
 	{ id: "tab-commands", text: "Type `pin` or `mute` to act on this tab", uses: ["pin-tab", "mute-tab"] },
-	{ id: "tab-switcher", text: "Ctrl+Tab switches between the tabs you visited recently", uses: [] }
+	{ id: "tab-switcher", text: "Ctrl+Tab switches between the tabs you visited recently", uses: [] },
+	{ id: "incognito", text: "Turn on Allow in Incognito for Arclike in chrome://extensions, so its keys work in incognito windows too",
+		when: "incognitoOff", uses: [] }
 ];
 var commandBarTips = { next: 0, retired: [] };  // kept in chrome.storage.local
 var commandBarTip = null;                       // the tip on the bar now
@@ -610,11 +622,14 @@ chrome.history.onVisited.addListener(function(item) {
 	}
 });
 
-// Deleted history must not be suggested, so read it again.
-chrome.history.onVisitRemoved.addListener(function() {
+// Deleted history must not be suggested, so read it again, and drop the choices made for it.
+chrome.history.onVisitRemoved.addListener(function(removed) {
 	commandBarHistory = null;
 	commandBarHistoryLoading = null;
 	commandBarLoadHistory();
+	rankMemoryLoaded.then(function() {
+		rankForget(removed);
+	});
 });
 
 // Recently closed tabs, newest first. Closed windows are left out: Reopen Closed Tab brings
@@ -670,11 +685,13 @@ var commandBarSearch = async function(query) {
 			commandBarClosedTabs()
 		]);
 		commandBarClosedCount = found[2].length;
-		// The tab the bar opened over is where you already are.
+		// The tab the bar opened over is where you already are. Incognito tabs show only in an
+		// incognito window, and normal tabs only in a normal one.
 		var hereTabId = commandBarTarget ? commandBarTarget.tabId : null;
+		var incognito = Boolean(commandBarTarget && commandBarTarget.incognito);
 		results = commandBarRank(query, {
 			context: { now: Date.now(), recalled: rankRecall(query), switched: commandBarSwitched },
-			tabs: found[0].filter(function(tab) { return tab.id !== hereTabId; }),
+			tabs: found[0].filter(function(tab) { return tab.id !== hereTabId && Boolean(tab.incognito) === incognito; }),
 			closed: found[2],
 			bookmarks: found[1].filter(function(bookmark) { return bookmark.url; }),
 			history: commandBarHistory ? Array.from(commandBarHistory.values()) : [],
@@ -747,6 +764,9 @@ var commandBarShowFor = function(mode, win, active) {
 	if (win.type === "popup") {
 		commandBarTarget.littleArc = true;
 	}
+	if (win.incognito) {
+		commandBarTarget.incognito = true;
+	}
 	commandBarLastQuery = "";
 	var text = "";
 	if (mode === "current_tab" && active && !/^(chrome:\/\/newtab\/?|about:blank)$/.test(active.url || "")) {
@@ -807,7 +827,8 @@ var commandBarChoose = async function(message) {
 	var text = (message.text || "").trim();
 	var item = message.item || (text ? commandBarDefaultRow(text) : null);
 	commandBarRetireUsedTip(item);
-	if (!target.pick) {
+	// What is typed in an incognito window is not kept.
+	if (!target.pick && !target.incognito) {
 		rankRemember(commandBarLastQuery, item);
 	}
 	var newTab = target.mode === "new_tab";

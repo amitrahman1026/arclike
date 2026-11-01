@@ -116,16 +116,59 @@ test('tabs opened inside Chrome stay where they are', async () => {
   }
 });
 
+// Open tab 10 in a Little Arc (window 2), then close it there, the way Cmd+W does.
+async function closeInLittleArc(h, url) {
+  h.chrome.windows.create = async () => ({ id: 2, type: 'popup', tabs: [{ id: 10, url }] });
+  await h.call('littleArcOpen(10, 1)');
+  h.chrome.tabs.onRemoved.emit(10, { windowId: 2, isWindowClosing: true });
+  h.ran.length = 0;
+}
+
 test('a closed Little Arc tab that Chrome reopens in a popup goes to the main window', async () => {
   const h = inLittleArc();
+  await closeInLittleArc(h, 'https://docs.rs/');
+  assert.deepStrictEqual(plain(h.session.littleArc.closed), ['https://docs.rs/'], 'the closed address is saved');
   h.chrome.tabs.onCreated.emit({ id: 20, windowId: 2, url: 'https://docs.rs/' });
   await settle();
   assert.deepStrictEqual(plain(h.ran), [['tabs.move', 20, { windowId: 1, index: -1 }]]);
   assert.deepStrictEqual(plain(h.windowsFocused).pop(), { id: 1, props: { focused: true } });
+  h.chrome.tabs.onCreated.emit({ id: 21, windowId: 2, url: 'https://docs.rs/' });
+  await settle();
+  assert.strictEqual(plain(h.ran).length, 1, 'one closed tab brings back one tab');
+});
+
+test('the address a Little Arc tab had when it closed is the one that counts', async () => {
+  const h = inLittleArc();
+  h.chrome.windows.create = async () => ({ id: 2, type: 'popup', tabs: [{ id: 10, url: 'https://docs.rs/' }] });
+  await h.call('littleArcOpen(10, 1)');
+  h.chrome.tabs.onUpdated.emit(10, { url: 'https://docs.rs/serde' }, { id: 10, windowId: 2 });
+  h.chrome.tabs.onRemoved.emit(10, { windowId: 2, isWindowClosing: true });
+  h.ran.length = 0;
+  h.chrome.tabs.onCreated.emit({ id: 20, windowId: 2, url: 'https://docs.rs/serde' });
+  await settle();
+  assert.strictEqual(plain(h.ran).length, 1);
+});
+
+test('a popup without an opener that no Little Arc closed keeps its tab', async () => {
+  const h = inLittleArc();
+  await closeInLittleArc(h, 'https://docs.rs/');
+  // window.open(url, "_blank", "popup,noopener"), or another extension's popup.
+  h.chrome.tabs.onCreated.emit({ id: 20, windowId: 2, url: 'https://accounts.example.org/' });
+  await settle();
+  assert.deepStrictEqual(plain(h.ran), []);
+});
+
+test('a tab closed in a normal window does not count', async () => {
+  const h = inLittleArc();
+  h.chrome.tabs.onRemoved.emit(10, { windowId: 1, isWindowClosing: false });
+  h.chrome.tabs.onCreated.emit({ id: 20, windowId: 2, url: 'https://example.com/10' });
+  await settle();
+  assert.deepStrictEqual(plain(h.ran), []);
 });
 
 test('a popup opened by a page, and a new Little Arc, keep their tab', async () => {
   const h = inLittleArc();
+  await closeInLittleArc(h, 'https://accounts.example.org/');
   h.chrome.tabs.onCreated.emit({ id: 20, windowId: 2, url: 'https://accounts.example.org/', openerTabId: 10 });
   h.chrome.tabs.onCreated.emit({ id: 21, windowId: 2, url: 'about:blank' });
   h.chrome.tabs.onCreated.emit({ id: 22, windowId: 1, url: 'https://example.org/' });

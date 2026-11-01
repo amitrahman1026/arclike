@@ -301,8 +301,21 @@ function readArcFromApp() {
 			delete arcRequests[id];
 			reject(arcError("app_no_answer", "No arc_data reply to read_arc within " + ARC_READ_TIMEOUT_MS / 1000 + " s"));
 		}, ARC_READ_TIMEOUT_MS);
-		arcRequests[id] = function(message) { clearTimeout(timer); resolve(message); };
+		arcRequests[id] = function(message) {
+			clearTimeout(timer);
+			if (message) resolve(message);
+			else reject(arcError("app_disconnected", "The app closed the connection before it sent arc_data"));
+		};
 		sendToNativeHost({ action: "read_arc", requestId: id });
+	});
+}
+
+// The connection to the app closed: no reply to a read in flight can come any more.
+function arcPortClosed() {
+	Object.keys(arcRequests).forEach(function(id) {
+		var callback = arcRequests[id];
+		delete arcRequests[id];
+		callback(null);
 	});
 }
 

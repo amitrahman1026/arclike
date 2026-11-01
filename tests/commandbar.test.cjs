@@ -740,3 +740,55 @@ test('every macOS command hint has a Windows counterpart', () => {
   const missing = h.g('COMMAND_BAR_COMMANDS').filter(c => c.hint && !(c.hint in windows)).map(c => c.hint);
   assert.deepStrictEqual(plain(missing), []);
 });
+
+test('a new app process, which counts its queries from 1 again, is answered', async () => {
+  const h = browser();
+  await h.deliver({ action: 'ready' });
+  await h.call(`commandBarOpen("new_tab")`);
+  await h.call(`commandBarQuery({ query: "netf", seq: 40 })`);
+  await h.deliver({ action: 'ready' });
+  await h.call(`commandBarOpen("new_tab")`);
+  h.sent.length = 0;
+  await h.call(`commandBarQuery({ query: "netf", seq: 1 })`);
+  assert.strictEqual(h.lastSent('command_bar_results').seq, 1);
+});
+
+test('a page deleted from history is no longer offered from what was chosen before', async () => {
+  const page = { url: 'https://bank.example/login', title: 'Bank', visitCount: 1, lastVisitTime: Date.now() };
+  const h = browser({ history: [page] });
+  await h.call('commandBarOpen("new_tab")');
+  await choose(h, 'bank', { kind: 'history', title: 'Bank', url: page.url });
+  await choose(h, 'juice', { kind: 'search', title: 'juice', text: 'juice' });
+  h.chrome.history.search = async () => [];
+  h.chrome.history.onVisitRemoved.emit({ allHistory: false, urls: [page.url] });
+  await new Promise(r => setTimeout(r, 0));
+  assert.ok(!(await query(h, 'ba')).some(r => r.url === page.url));
+  assert.deepStrictEqual(h.local.commandBarMemory.map(e => e.text), ['juice'], 'other choices stay');
+  h.chrome.history.onVisitRemoved.emit({ allHistory: true, urls: [] });
+  await new Promise(r => setTimeout(r, 0));
+  assert.deepStrictEqual(plain(h.local.commandBarMemory), []);
+});
+
+test('what is chosen in an incognito window is not remembered, and its tabs stay out of normal windows', async () => {
+  const h = browser();
+  h.state.windows.push(Object.assign(win(2, [tab(20, { active: true, incognito: true,
+    url: 'https://netflix.com/secret', title: 'Netflix secret' })]), { incognito: true }));
+  await h.call('commandBarOpen("new_tab")');
+  assert.ok(!(await query(h, 'netf')).some(r => r.tabId === 20), 'a normal window does not list incognito tabs');
+  h.focusWindow(2);
+  await h.call('commandBarOpen("new_tab")');
+  await choose(h, 'gi', { kind: 'history', title: 'GitHub', url: 'https://github.com/' });
+  assert.strictEqual(h.local.commandBarMemory, undefined);
+});
+
+test('the incognito tip shows only while Chrome keeps Arclike out of incognito windows', async () => {
+  const retired = ['site-settings', 'split-view', 'closed-tabs', 'tab-groups', 'tab-commands', 'tab-switcher'];
+  let h = browser({ storage: { commandBarTips: { next: 0, retired } } });
+  h.set('commandBarIncognitoAllowed', false);
+  await h.call('commandBarOpen("new_tab")');
+  assert.strictEqual(h.g('commandBarTip').id, 'incognito');
+  h = browser({ storage: { commandBarTips: { next: 0, retired } } });
+  h.set('commandBarIncognitoAllowed', true);
+  await h.call('commandBarOpen("new_tab")');
+  assert.strictEqual(h.g('commandBarTip'), null);
+});

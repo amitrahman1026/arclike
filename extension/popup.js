@@ -124,7 +124,9 @@ var ARC_ERRORS = ON_WINDOWS ? {
 };
 Object.assign(ARC_ERRORS, {
   arc_bad_format: "Arc saves its data in a format Arclike doesn't recognize. Arc may have changed it.",
-  too_large: "Your Arc sidebar is too big to import in one go.",
+  app_disconnected: "The Arclike app stopped while it read Arc's data. Try again. If it stops again, click Copy details.",
+  too_large: "Your Arc sidebar is too big to import. Chrome takes at most 1 MB at a time from the app, and Arc's " +
+    "sidebar, cut down to what the import uses, is larger. Archive or delete tabs and folders in Arc, then try again.",
   arc_empty: "Arc has no pinned tabs or favorites to import.",
 });
 

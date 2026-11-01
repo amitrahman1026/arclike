@@ -161,6 +161,27 @@ var rankRemember = function(text, item, now) {
 	rankRememberAll([entry]);
 };
 
+// Forget what history deletion removed, so a page deleted from Chrome's history is not offered
+// again from here. `removed` is chrome.history.onVisitRemoved's argument: with allHistory, every
+// choice goes, searches too, since Chrome's history holds each search's results page.
+var rankForget = function(removed) {
+	if (!removed) {
+		return;
+	}
+	var before = rankMemory.length;
+	if (removed.allHistory) {
+		rankMemory = [];
+	} else {
+		var keys = new Set((removed.urls || []).map(commandBarUrlKey));
+		rankMemory = rankMemory.filter(function(entry) {
+			return !entry.url || !keys.has(commandBarUrlKey(entry.url));
+		});
+	}
+	if (rankMemory.length !== before) {
+		rankSaveMemory();
+	}
+};
+
 // How strongly the memory suggests each choice for `text`: an entry counts when what was typed
 // then starts with `text`. It counts far more when `text` is all or nearly all of it, and more
 // the more often it was chosen and the more recently. Returns { pages: url key -> {strength, url, title},

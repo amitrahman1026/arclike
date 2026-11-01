@@ -375,3 +375,16 @@ test('closing a tab forgets its preview and its visit', () => {
   assert.strictEqual(h.g('visitedTabs')[11], undefined);
   assert.ok(!h.g('mru').includes(11));
 });
+
+test('switcher cards carry Chrome\'s cached favicon as a data URL, never the site\'s own address', async () => {
+  const h = load({ windows: [win(1, [
+    tab(10, { active: true, lastAccessed: fresh(1), favIconUrl: 'https://example.com/favicon.ico' }),
+    tab(11, { lastAccessed: fresh(2), url: 'https://other.example/', favIconUrl: 'https://other.example/f.ico' }),
+  ], true)] });
+  h.chrome.tabs.onActivated.emit({ tabId: 10, windowId: 1 });
+  for (let i = 0; i < 5; i++) await new Promise(r => setTimeout(r, 0));
+  await h.deliver({ action: 'cycle_next', current_window_only: true });
+  const tabs = h.lastSent('show_switcher').tabs;
+  assert.strictEqual(tabs.find(t => t.id === 10).favIconUrl, 'data:image/png;base64,AQID');
+  assert.strictEqual(tabs.find(t => t.id === 11).favIconUrl, '', 'not cached yet, so none rather than a web address');
+});

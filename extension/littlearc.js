@@ -126,12 +126,78 @@ chrome.tabs.onCreated.addListener(async function(tab) {
 
 // Chrome reopens a closed tab in the kind of window it closed in, so Reopen Closed Tab (Cmd+Shift+T)
 // brings a tab closed in a Little Arc back in a new popup. Move it to the main window, as Arc
-// does. A popup that a page opened with window.open has an opener, and the popups Little Arc
-// opens get their tab moved in, not created, so neither comes here.
+// does. Only a tab whose address was closed in one of Arclike's own Little Arcs counts: a page's
+// popup opened with noopener, or another extension's popup, also has no opener and must stay.
+var LITTLE_ARC_CLOSED_MAX = 25;   // Chrome's own list of recently closed tabs is as long
+var littleArcWindows = new Set();   // the Little Arcs Arclike opened
+var littleArcTabUrls = new Map();   // tab ID -> address, for the tabs in them
+var littleArcClosedUrls = [];       // addresses closed in them, newest last
+
+// chrome.storage.session survives a restart of the worker, not of the browser.
+var littleArcSave = function() {
+	chrome.storage.session.set({ littleArc: { windows: Array.from(littleArcWindows), closed: littleArcClosedUrls } });
+};
+chrome.storage.session.get("littleArc", function(data) {
+	var saved = data && data.littleArc;
+	if (saved) {
+		(saved.windows || []).forEach(function(id) { littleArcWindows.add(id); });
+		littleArcClosedUrls = (saved.closed || []).concat(littleArcClosedUrls).slice(-LITTLE_ARC_CLOSED_MAX);
+	}
+});
+
+// Start keeping track of Little Arc `win`, as chrome.windows.create returns it.
+var littleArcTrack = function(win) {
+	if (!win || win.id === undefined) {
+		return;
+	}
+	littleArcWindows.add(win.id);
+	(win.tabs || []).forEach(function(tab) {
+		var url = tab.pendingUrl || tab.url;
+		if (url) {
+			littleArcTabUrls.set(tab.id, url);
+		}
+	});
+	littleArcSave();
+};
+
+chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
+	if (changeInfo.url && littleArcWindows.has(tab.windowId)) {
+		littleArcTabUrls.set(tabId, changeInfo.url);
+	}
+});
+
+chrome.tabs.onRemoved.addListener(function(tabId, removeInfo) {
+	var url = littleArcTabUrls.get(tabId);
+	littleArcTabUrls.delete(tabId);
+	if (!littleArcWindows.has(removeInfo.windowId)) {
+		return;
+	}
+	if (url && /^https?:/i.test(url)) {
+		littleArcClosedUrls.push(url);
+		littleArcClosedUrls = littleArcClosedUrls.slice(-LITTLE_ARC_CLOSED_MAX);
+	}
+	if (removeInfo.isWindowClosing) {
+		littleArcWindows.delete(removeInfo.windowId);
+	}
+	littleArcSave();
+});
+
+// A tab moved out of a Little Arc is no longer in one.
+if (chrome.tabs.onDetached) {
+	chrome.tabs.onDetached.addListener(function(tabId, detachInfo) {
+		if (littleArcWindows.has(detachInfo.oldWindowId)) {
+			littleArcTabUrls.delete(tabId);
+		}
+	});
+}
+
 chrome.tabs.onCreated.addListener(async function(tab) {
 	var url = tab.pendingUrl || tab.url || "";
 	if (tab.openerTabId !== undefined || !/^https?:/i.test(url) ||
 		Date.now() - littleArcCommandBarAt < LITTLE_ARC_COMMAND_BAR_MS) {
+		return;
+	}
+	if (littleArcClosedUrls.indexOf(url) === -1) {
 		return;
 	}
 	try {
@@ -139,6 +205,13 @@ chrome.tabs.onCreated.addListener(async function(tab) {
 		if (win.type !== "popup") {
 			return;
 		}
+		// Each closed address brings back one tab. Another tab may have taken it meanwhile.
+		var closedAt = littleArcClosedUrls.lastIndexOf(url);
+		if (closedAt === -1) {
+			return;
+		}
+		littleArcClosedUrls.splice(closedAt, 1);
+		littleArcSave();
 		log("LittleArc::Moving reopened tab " + tab.id + " from a popup to the main window");
 		await littleArcMoveToMain(tab.id);
 	} catch (e) {
@@ -164,7 +237,9 @@ var littleArcBounds = function(near) {
 // Move tab `tabId` into a new Little Arc over window `nearWindowId`.
 var littleArcOpen = async function(tabId, nearWindowId) {
 	var near = await chrome.windows.get(nearWindowId).catch(function() { return null; });
-	return chrome.windows.create(Object.assign({ tabId: tabId, type: "popup", focused: true }, littleArcBounds(near)));
+	var win = await chrome.windows.create(Object.assign({ tabId: tabId, type: "popup", focused: true }, littleArcBounds(near)));
+	littleArcTrack(win);
+	return win;
 };
 
 // Open an empty Little Arc and the command bar over it, to type where to go.
@@ -172,6 +247,7 @@ var littleArcNew = async function(nearWindowId) {
 	var near = await chrome.windows.get(nearWindowId).catch(function() { return null; });
 	var win = await chrome.windows.create(Object.assign({ url: "about:blank", type: "popup", focused: true },
 		littleArcBounds(near)));
+	littleArcTrack(win);
 	// The bar opens over the focused window, so give the new one a moment to take focus.
 	await new Promise(function(resolve) { setTimeout(resolve, 150); });
 	var tab = win.tabs && win.tabs[0];
