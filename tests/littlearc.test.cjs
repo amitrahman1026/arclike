@@ -116,6 +116,23 @@ test('tabs opened inside Chrome stay where they are', async () => {
   }
 });
 
+test('a closed Little Arc tab that Chrome reopens in a popup goes to the main window', async () => {
+  const h = inLittleArc();
+  h.chrome.tabs.onCreated.emit({ id: 20, windowId: 2, url: 'https://docs.rs/' });
+  await settle();
+  assert.deepStrictEqual(plain(h.ran), [['tabs.move', 20, { windowId: 1, index: -1 }]]);
+  assert.deepStrictEqual(plain(h.windowsFocused).pop(), { id: 1, props: { focused: true } });
+});
+
+test('a popup opened by a page, and a new Little Arc, keep their tab', async () => {
+  const h = inLittleArc();
+  h.chrome.tabs.onCreated.emit({ id: 20, windowId: 2, url: 'https://accounts.example.org/', openerTabId: 10 });
+  h.chrome.tabs.onCreated.emit({ id: 21, windowId: 2, url: 'about:blank' });
+  h.chrome.tabs.onCreated.emit({ id: 22, windowId: 1, url: 'https://example.org/' });
+  await settle();
+  assert.deepStrictEqual(plain(h.ran), []);
+});
+
 test('turning the option on in the popup takes effect at once', async () => {
   const h = browser();
   h.chrome.storage.onChanged.emit({ littleArcForLinks: { newValue: true } }, 'local');

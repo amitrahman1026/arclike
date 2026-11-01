@@ -124,6 +124,28 @@ chrome.tabs.onCreated.addListener(async function(tab) {
 	}
 });
 
+// Chrome reopens a closed tab in the kind of window it closed in, so Reopen Closed Tab (Cmd+Shift+T)
+// brings a tab closed in a Little Arc back in a new popup. Move it to the main window, as Arc
+// does. A popup that a page opened with window.open has an opener, and the popups Little Arc
+// opens get their tab moved in, not created, so neither comes here.
+chrome.tabs.onCreated.addListener(async function(tab) {
+	var url = tab.pendingUrl || tab.url || "";
+	if (tab.openerTabId !== undefined || !/^https?:/i.test(url) ||
+		Date.now() - littleArcCommandBarAt < LITTLE_ARC_COMMAND_BAR_MS) {
+		return;
+	}
+	try {
+		var win = await chrome.windows.get(tab.windowId);
+		if (win.type !== "popup") {
+			return;
+		}
+		log("LittleArc::Moving reopened tab " + tab.id + " from a popup to the main window");
+		await littleArcMoveToMain(tab.id);
+	} catch (e) {
+		log("LittleArc::Could not move the reopened tab: " + e.message);
+	}
+});
+
 // The size and place of a Little Arc: centred over `near`, the window it opens from.
 var littleArcBounds = function(near) {
 	if (!near || near.width === undefined) {
