@@ -37,7 +37,9 @@ namespace Arclike.IPC
         public event Action<string>? OnCtrlCancel;                      // targetBrowser
         public event Action<string>? OnCopyUrl;                         // targetBrowser
         public event Action<string, string>? OnCommandBar;              // mode, targetBrowser
-        public event Action<string, int>? OnCommandBarReady;            // browser, pid
+        public event Action<string, int, bool>? OnHostReady;            // browser, pid, commandBar
+        public event Action<string, int, bool>? OnLittleArcFocus;       // browser, pid, focused
+        public event Action<string>? OnLittleArcToMain;                 // targetBrowser
         public event Action? OnShortcutsChanged;
         public event Action? OnLeaderResigned;
         public event Action? OnShowConfig;
@@ -95,7 +97,11 @@ namespace Arclike.IPC
 
         public void PostCommandBar(string mode, string targetBrowser) => Post(new { type = "commandBar", mode, targetBrowser });
 
-        public void PostCommandBarReady(string browser, int pid) => Post(new { type = "commandBarReady", browser, pid });
+        public void PostHostReady(string browser, int pid, bool commandBar) => Post(new { type = "hostReady", browser, pid, commandBar });
+
+        public void PostLittleArcFocus(string browser, int pid, bool focused) => Post(new { type = "littleArcFocus", browser, pid, focused });
+
+        public void PostLittleArcToMain(string targetBrowser) => Post(new { type = "littleArcToMain", targetBrowser });
 
         public void PostShortcutsChanged() => Post(new { type = "shortcutsChanged" });
 
@@ -268,8 +274,14 @@ namespace Arclike.IPC
                     case "commandBar":
                         OnCommandBar?.Invoke(Str("mode"), Str("targetBrowser"));
                         break;
-                    case "commandBarReady":
-                        OnCommandBarReady?.Invoke(Str("browser"), doc["pid"]?.GetValue<int>() ?? 0);
+                    case "hostReady":
+                        OnHostReady?.Invoke(Str("browser"), doc["pid"]?.GetValue<int>() ?? 0, Bool("commandBar"));
+                        break;
+                    case "littleArcFocus":
+                        OnLittleArcFocus?.Invoke(Str("browser"), doc["pid"]?.GetValue<int>() ?? 0, Bool("focused"));
+                        break;
+                    case "littleArcToMain":
+                        OnLittleArcToMain?.Invoke(Str("targetBrowser"));
                         break;
                     case "shortcutsChanged":
                         OnShortcutsChanged?.Invoke();

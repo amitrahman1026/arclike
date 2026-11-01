@@ -27,14 +27,14 @@ namespace Arclike
         private ToastOverlay? _toastOverlay;
         private SetupWindow? _setupWindow;
 
+        /// <summary>Set once our extension has registered.</summary>
+        private volatile bool _extensionRegistered;
         /// <summary>Set once our extension says it answers the command bar.</summary>
         private volatile bool _extensionSupportsCommandBar;
-        /// <summary>
-        /// Native hosts whose extension answers the command bar, by browser. The hook reads it to
-        /// decide whether Ctrl+T and Ctrl+L go to the bar or stay with the browser.
-        /// </summary>
-        private readonly Dictionary<string, HashSet<int>> _commandBarHosts = new();
-        private readonly object _commandBarHostsLock = new();
+        /// <summary>A Little Arc of our extension's profile is in front, as the extension last said.</summary>
+        private volatile bool _littleArcFocusedHere;
+        /// <summary>Every host whose extension registered. The hook acts only in their browsers.</summary>
+        private readonly HostRegistry _hosts = new(pid => Win32.IsProcessAlive((uint)pid));
 
         public bool LaunchedDirectly { get; private set; }
         public string? OwnerBrowserId { get; set; }
@@ -65,8 +65,10 @@ namespace Arclike
             _ipc.OnCtrlCancel += OnIpcCtrlCancel;
             _ipc.OnCopyUrl += OnIpcCopyUrl;
             _ipc.OnCommandBar += OnIpcCommandBar;
-            _ipc.OnCommandBarReady += OnIpcCommandBarReady;
-            _ipc.OnConnectedToLeader += AnnounceCommandBar;
+            _ipc.OnHostReady += _hosts.SetReady;
+            _ipc.OnLittleArcFocus += _hosts.SetLittleArcInFront;
+            _ipc.OnLittleArcToMain += OnIpcLittleArcToMain;
+            _ipc.OnConnectedToLeader += AnnounceHost;
             _ipc.OnShortcutsChanged += OnIpcShortcutsChanged;
             _ipc.OnLeaderResigned += () => Dispatcher.BeginInvoke(TryTakeLeadership);
 
@@ -132,7 +134,7 @@ namespace Arclike
 
         private void InstallHook()
         {
-            _keyboardHook = new KeyboardHook(_ipc!, CommandBarAvailable);
+            _keyboardHook = new KeyboardHook(_ipc!, _hosts);
             if (!_keyboardHook.Install())
                 DebugLogger.Log("Keyboard hook failed to install");
         }
@@ -145,41 +147,22 @@ namespace Arclike
             _leaderRecoveryTimer?.Stop();
             _ipc!.BecomeLeader();
             InstallHook();
-            AnnounceCommandBar();
+            AnnounceHost();
             DebugLogger.Log("Became the keyboard hook leader");
         }
 
-        // ---- Command bar availability ----
-
-        /// <summary>Tell every instance that our browser's extension answers the command bar.</summary>
-        private void AnnounceCommandBar()
-        {
-            if (_extensionSupportsCommandBar && OwnerBrowserId != null)
-                _ipc?.PostCommandBarReady(OwnerBrowserId, Environment.ProcessId);
-        }
-
-        private void OnIpcCommandBarReady(string browser, int pid)
-        {
-            lock (_commandBarHostsLock)
-            {
-                if (!_commandBarHosts.TryGetValue(browser, out var pids))
-                    _commandBarHosts[browser] = pids = new HashSet<int>();
-                pids.Add(pid);
-            }
-        }
+        // ---- Host availability ----
 
         /// <summary>
-        /// Whether a running native host for `browser` can answer the command bar. A browser whose
-        /// extension cannot keeps its own Ctrl+T and Ctrl+L. Runs on the hook thread.
+        /// Tell every instance that our browser's extension is connected and what it answers, so
+        /// the leader starts taking Arclike's keys in that browser. A new leader hears it again.
         /// </summary>
-        private bool CommandBarAvailable(string browser)
+        private void AnnounceHost()
         {
-            lock (_commandBarHostsLock)
-            {
-                if (!_commandBarHosts.TryGetValue(browser, out var pids)) return false;
-                pids.RemoveWhere(pid => !Win32.IsProcessAlive((uint)pid));
-                return pids.Count > 0;
-            }
+            if (!_extensionRegistered || OwnerBrowserId == null) return;
+            _ipc?.PostHostReady(OwnerBrowserId, Environment.ProcessId, _extensionSupportsCommandBar);
+            if (_littleArcFocusedHere)
+                _ipc?.PostLittleArcFocus(OwnerBrowserId, Environment.ProcessId, true);
         }
 
         // ---- Native messaging ----
@@ -233,6 +216,23 @@ namespace Arclike
 
                 case "log":
                     DebugLogger.Log($"Extension: {Str(raw, "message")}");
+                    break;
+
+                case "read_arc":
+                {
+                    var requestId = raw["requestId"]?.DeepClone();
+                    System.Threading.Tasks.Task.Run(() =>
+                    {
+                        var import = new ArcImport(ArcImport.FindArcDir(), ArcImport.ChromeUserDataDir(), DebugLogger.Log);
+                        _nativeMessaging?.SendMessage(import.Response(requestId, Constants.AppVersion, Environment.OSVersion.Version.ToString()));
+                    });
+                    break;
+                }
+
+                case "little_arc_focus":
+                    _littleArcFocusedHere = raw["focused"]?.GetValue<bool>() ?? false;
+                    if (OwnerBrowserId != null)
+                        _ipc?.PostLittleArcFocus(OwnerBrowserId, Environment.ProcessId, _littleArcFocusedHere);
                     break;
 
                 case "register":
@@ -308,11 +308,9 @@ namespace Arclike
             };
             _nativeMessaging?.SendMessage(new { action = "registered", bundleId = OwnerBrowserId ?? message.BundleId, shortcuts });
 
-            if (raw["features"] is JsonArray features && features.Any(f => f?.GetValue<string>() == "command_bar"))
-            {
-                _extensionSupportsCommandBar = true;
-                AnnounceCommandBar();
-            }
+            _extensionSupportsCommandBar = raw["features"] is JsonArray features && features.Any(f => f?.GetValue<string>() == "command_bar");
+            _extensionRegistered = true;
+            AnnounceHost();
         }
 
         private void OnNativeDisconnected()
@@ -357,6 +355,16 @@ namespace Arclike
             if (!_extensionSupportsCommandBar || !IsOurs(targetBrowser)) return;
             DebugLogger.Log($"Command bar requested, mode={mode}");
             _nativeMessaging?.SendMessage(new { action = "command_bar_open", mode });
+        }
+
+        /// <summary>
+        /// Ctrl+O in a Little Arc of our browser. Every host of that browser hears it. Only the one
+        /// whose profile has the Little Arc in front passes it on.
+        /// </summary>
+        private void OnIpcLittleArcToMain(string targetBrowser)
+        {
+            if (!_littleArcFocusedHere || !IsOurs(targetBrowser)) return;
+            _nativeMessaging?.SendMessage(new { action = "little_arc_to_main" });
         }
 
         private void OnIpcShortcutsChanged()

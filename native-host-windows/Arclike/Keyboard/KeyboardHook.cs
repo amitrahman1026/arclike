@@ -10,8 +10,9 @@ using Arclike.Services;
 namespace Arclike.Keyboard
 {
     /// <summary>
-    /// Low-level keyboard hook for Ctrl+Tab, Ctrl+Esc, the copy-URL shortcut and the command bar
-    /// keys (Ctrl+T, Ctrl+L). Port of eventTapCallback in main.swift.
+    /// Low-level keyboard hook for Ctrl+Tab, Ctrl+Esc, the copy-URL shortcut, the command bar
+    /// keys (Ctrl+T, Ctrl+L) and Ctrl+O in a Little Arc. Port of eventTapCallback in main.swift.
+    /// It acts only in a browser that has Arclike connected (HostRegistry).
     ///
     /// The hook runs on its own thread with its own message loop. Windows drops a low-level hook
     /// whose callback is too slow (LowLevelHooksTimeout), so the callback never waits on the UI
@@ -25,9 +26,10 @@ namespace Arclike.Keyboard
     {
         private const int VK_T = 0x54;
         private const int VK_L = 0x4C;
+        private const int VK_O = 0x4F;
 
         private readonly InstanceCommunication _ipc;
-        private readonly Func<string, bool> _commandBarAvailable;
+        private readonly HostRegistry _hosts;
         private NativeMethods.LowLevelKeyboardProc? _hookProc;
         private IntPtr _hookId = IntPtr.Zero;
         private Thread? _thread;
@@ -40,10 +42,10 @@ namespace Arclike.Keyboard
         private bool _swallowEscapeUp;
         private readonly Dictionary<uint, string?> _browserByProcess = new();
 
-        public KeyboardHook(InstanceCommunication ipc, Func<string, bool> commandBarAvailable)
+        public KeyboardHook(InstanceCommunication ipc, HostRegistry hosts)
         {
             _ipc = ipc;
-            _commandBarAvailable = commandBarAvailable;
+            _hosts = hosts;
         }
 
         /// <summary>Start the hook thread. Returns whether the hook was installed.</summary>
@@ -148,8 +150,9 @@ namespace Arclike.Keyboard
             if (!isDown)
                 return false;
 
+            // A browser without Arclike connected keeps every key.
             var browser = ForegroundBrowserId();
-            if (browser == null)
+            if (browser == null || !_hosts.Connected(browser))
                 return false;
 
             var currentMods = CurrentModifiers();
@@ -169,7 +172,7 @@ namespace Arclike.Keyboard
 
             // Ctrl+T and Ctrl+L open the command bar instead of the browser's new tab and address
             // bar, when a host for this browser can answer it. Ctrl+Shift+T and the others pass.
-            if ((vk == VK_T || vk == VK_L) && currentMods == ModifierKeysFlag.Control && _commandBarAvailable(browser))
+            if ((vk == VK_T || vk == VK_L) && currentMods == ModifierKeysFlag.Control && _hosts.CommandBar(browser))
             {
                 // Low-level hooks get no auto-repeat flag: a second key-down before the key-up
                 // is a repeat.
@@ -177,6 +180,18 @@ namespace Arclike.Keyboard
                 {
                     _commandKeyDown = vk;
                     _ipc.PostCommandBar(vk == VK_T ? "new_tab" : "current_tab", browser);
+                }
+                return true;
+            }
+
+            // Ctrl+O while a Little Arc is in front moves its tab to the main window, as Cmd+O
+            // does in Arc. Elsewhere Ctrl+O stays the browser's Open File.
+            if (vk == VK_O && currentMods == ModifierKeysFlag.Control && _hosts.LittleArcInFront(browser))
+            {
+                if (_commandKeyDown != vk)
+                {
+                    _commandKeyDown = vk;
+                    _ipc.PostLittleArcToMain(browser);
                 }
                 return true;
             }

@@ -6,6 +6,9 @@ namespace Arclike.Helpers
     public static class DebugLogger
     {
         private static readonly object _lock = new();
+        // The log is moved aside to Arclike.old.log once it reaches this size, so it never holds
+        // more than twice this on disk. The command bar logs every keystroke.
+        private const long MaxBytes = 2 * 1024 * 1024;
         private static bool _enabled = true;
 
         public static bool Enabled
@@ -35,6 +38,9 @@ namespace Arclike.Helpers
             {
                 lock (_lock)
                 {
+                    var log = new FileInfo(Constants.DebugLogPath);
+                    if (log.Exists && log.Length > MaxBytes)
+                        File.Move(log.FullName, Path.ChangeExtension(log.FullName, ".old.log"), overwrite: true);
                     File.AppendAllText(Constants.DebugLogPath, logMessage + Environment.NewLine);
                 }
             }
