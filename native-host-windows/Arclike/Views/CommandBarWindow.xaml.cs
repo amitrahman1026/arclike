@@ -9,6 +9,7 @@ using System.Windows.Documents;
 using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Threading;
 using Arclike.Helpers;
 using Arclike.Models;
 
@@ -43,6 +44,7 @@ namespace Arclike.Views
         private (string Id, string Text)? _tip;
 
         private bool _isVisible;
+        private bool _showing;  // inside ShowBar, where a deactivation is not a dismissal
         /// <summary>What was typed. The field can show more: an inline completion after it, selected.</summary>
         private string _typed = "";
         /// <summary>Set when the last edit added text at the end. Only then is a completion shown.</summary>
@@ -61,7 +63,12 @@ namespace Arclike.Views
             Placeholder.Text = DefaultPlaceholder;
             Field.TextChanged += Field_TextChanged;
             Field.PreviewKeyDown += Field_PreviewKeyDown;
-            Deactivated += (s, e) => Dismiss();
+            // The foreground steps in ShowBar can deactivate the bar for a moment. Decide once
+            // they are done, so only a real loss of focus closes it.
+            Deactivated += (s, e) => Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+            {
+                if (!_showing && !IsActive) Dismiss();
+            });
             SourceInitialized += (s, e) =>
             {
                 var hwnd = new WindowInteropHelper(this).Handle;
@@ -116,11 +123,20 @@ namespace Arclike.Views
             Height = height;
             WindowPlacement.MoveTo(this, x, y);
 
-            Show();
-            var method = TakeForeground();
-            Field.Focus();
-            System.Windows.Input.Keyboard.Focus(Field);
-            Field.SelectAll();
+            string method;
+            _showing = true;
+            try
+            {
+                Show();
+                method = TakeForeground();
+                Field.Focus();
+                System.Windows.Input.Keyboard.Focus(Field);
+                Field.SelectAll();
+            }
+            finally
+            {
+                _showing = false;
+            }
             DebugLogger.Log($"commandbar shown rect={x},{y},{widthPx}x{heightPx} scale={scale} focused={IsActive} method={method}");
             SendQuery();
         }
