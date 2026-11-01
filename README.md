@@ -40,7 +40,13 @@ You need Windows 10 or 11 and the .NET 8 SDK. In PowerShell:
 
 Then load the `extension` folder in `chrome://extensions` with **Load unpacked**, as on macOS. Windows asks for no permission.
 
-Coming from Arc? Click the Arclike icon in Chrome and choose **Import from Arc**: favorites become pinned tabs, each space's pinned tabs become bookmarks, and its open tabs become a tab group.
+Coming from Arc? Click the Arclike icon in Chrome and choose **Import from Arc**: favorites become pinned tabs, each space's pinned tabs become bookmarks, and its open tabs become a tab group. Limits:
+
+- The app sends Arc's sidebar to Chrome in one message, and Chrome takes at most 1 MB at a time. If the sidebar is larger, the import stops and says so. Archive or delete tabs in Arc, then import again.
+- A tab that Arc never loaded has no saved address, so the import leaves it out and counts it.
+- Arc's command bar choices come along only when they fit in the same message.
+
+Incognito windows: Chrome keeps extensions out of them unless you turn on **Allow in Incognito** for Arclike in `chrome://extensions`. Until then, Arclike still takes its keys in an incognito window and cannot answer them, so Ctrl+Tab, Cmd+T and Cmd+L do nothing there.
 
 <details>
 <summary>After a change</summary>
@@ -68,7 +74,7 @@ The signing identity keeps the Accessibility permission across rebuilds. Without
 <details>
 <summary>Privacy</summary>
 
-Arclike works only on your computer and sends nothing. Favicons come from Chrome's own cache. Arclike does not check for updates.
+Arclike works only on your computer and sends nothing. Site icons come from Chrome's own cache. Arclike does not check for updates. [PRIVACY.md](PRIVACY.md) lists what it reads and keeps.
 
 </details>
 
