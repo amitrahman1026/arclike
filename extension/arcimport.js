@@ -326,7 +326,7 @@ function arcImportReport(heading, context, error, failed) {
 		"Extension: " + context.extension,
 		"App: " + (context.app || "unknown (no reply from the app)"),
 		"Chrome: " + context.chrome,
-		"macOS: " + (context.macos || "unknown"));
+		context.windows ? "Windows: " + context.windows : "macOS: " + (context.macos || "unknown"));
 	if (context.path) {
 		lines.push("Arc file: " + context.path + (context.bytes ? " (" + context.bytes + " bytes, modified " + context.modified + ")" : ""));
 		lines.push("Arc format version: " + context.formatVersion);
@@ -337,8 +337,10 @@ function arcImportReport(heading, context, error, failed) {
 	if (failed && failed.length > 10) lines.push("... and " + (failed.length - 10) + " more");
 	lines.push(
 		"Time: " + new Date().toISOString(),
-		"Code: extension/arcimport.js, native-host/Sources/arclike/ArcImport.swift",
-		"App log: ~/Library/Logs/Arclike.log");
+		context.windows
+			? "Code: extension/arcimport.js, native-host-windows/Arclike/Services/ArcImport.cs"
+			: "Code: extension/arcimport.js, native-host/Sources/arclike/ArcImport.swift",
+		context.windows ? "App log: %LOCALAPPDATA%\\Arclike\\Arclike.log" : "App log: ~/Library/Logs/Arclike.log");
 	return lines.join("\n");
 }
 
@@ -348,7 +350,7 @@ async function handleArcImport(request) {
 	var context = { step: "reading Arc data through the Arclike app", extension: EXTENSION_VERSION, chrome: chromeVersion };
 	try {
 		var data = await readArcFromApp();
-		["app", "macos", "path", "bytes", "modified", "formatVersion"].forEach(function(k) {
+		["app", "macos", "windows", "path", "bytes", "modified", "formatVersion"].forEach(function(k) {
 			if (k in data) context[k] = data[k];
 		});
 		if (!data.ok) throw arcError(data.error, data.detail);

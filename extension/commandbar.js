@@ -275,7 +275,7 @@ var COMMAND_BAR_COMMANDS = [
 var COMMAND_BAR_WINDOWS_HINTS = {
 	"⌘W": "Ctrl+W", "⌘R": "Ctrl+R", "⇧⌘C": "Alt+Shift+C", "⇧⌘T": "Ctrl+Shift+T", "⌘N": "Ctrl+N",
 	"⇧⌘N": "Ctrl+Shift+N", "⌃⌘F": "F11", "⌘,": "", "⌘Y": "Ctrl+H", "⇧⌘J": "Ctrl+J", "⌥⌘B": "Ctrl+Shift+O",
-	"⇧⌘⌫": "Ctrl+Shift+Del", "⌘O": ""
+	"⇧⌘⌫": "Ctrl+Shift+Del", "⌘O": "Ctrl+O"
 };
 
 var commandBarOnWindows = /Windows/.test(navigator.userAgent);

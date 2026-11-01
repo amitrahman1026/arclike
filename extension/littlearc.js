@@ -53,8 +53,8 @@ chrome.windows.onFocusChanged.addListener(function(windowId) {
 	}
 });
 
-// Tell the app whether a Little Arc is in front, so it takes Cmd+O only then. Chrome keeps Cmd+O
-// for Open File everywhere else.
+// Tell the app whether a Little Arc is in front, so it takes Cmd+O (Ctrl+O on Windows) only
+// then. Chrome keeps Cmd+O for Open File everywhere else.
 var littleArcTellFocus = async function(windowId) {
 	var inFront = false;
 	if (windowId !== chrome.windows.WINDOW_ID_NONE) {
@@ -67,7 +67,7 @@ var littleArcTellFocus = async function(windowId) {
 	}
 };
 
-// Cmd+O, sent by the app while a Little Arc is in front: move its tab to the main window.
+// Cmd+O (Ctrl+O on Windows), sent by the app while a Little Arc is in front: move its tab to the main window.
 var littleArcToMainFromKey = async function() {
 	try {
 		var win = await chrome.windows.getLastFocused({ windowTypes: ["popup"], populate: true });

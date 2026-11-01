@@ -41,6 +41,15 @@ var currentVersion = chrome.runtime.getManifest().version;
 versionLabel.textContent = "v" + currentVersion;
 
 // Load custom shortcut display from storage
+// The page shows the Mac keys. On Windows the app reports its own copy-URL shortcut once it
+// connects, and the command bar is on Ctrl.
+var ON_WINDOWS = /Windows/.test(navigator.userAgent);
+if (ON_WINDOWS) {
+  document.getElementById("command-bar-keys").innerHTML =
+    '<span class="key">Ctrl T</span><span class="key-plus">/</span><span class="key">Ctrl L</span>';
+  document.getElementById("copy-url-keys").innerHTML = '<span class="key">Alt+Shift+C</span>';
+}
+
 chrome.storage.local.get("shortcuts", function(data) {
   if (data.shortcuts) {
     if (data.shortcuts.tabSwitch) {
@@ -102,15 +111,22 @@ var arcText = document.getElementById("arc-import-text");
 var arcButtons = document.getElementById("arc-import-buttons");
 var arcTree = document.getElementById("arc-import-tree");
 
-var ARC_ERRORS = {
+var ARC_ERRORS = ON_WINDOWS ? {
+  app_not_connected: "Arclike can't reach its Windows app. Install Arclike for Windows, then restart Chrome and try again.",
+  app_no_answer: "The Arclike Windows app didn't answer. It may be an older version: install the latest app, then try again.",
+  arc_not_found: "Arc's data isn't on this PC. Arc must be installed for this Windows user.",
+  arc_unreadable: "Arc's data is on this PC, but Arclike couldn't open it. Quit Arc, then try again.",
+} : {
   app_not_connected: "Arclike can't reach its Mac app. Open Arclike from Applications, then try again.",
   app_no_answer: "The Arclike Mac app didn't answer. It may be an older version: install the latest app, then try again.",
   arc_not_found: "Arc's data isn't on this Mac. Arc must be installed for this macOS user.",
   arc_unreadable: "Arc's data is on this Mac, but Arclike couldn't open it.",
+};
+Object.assign(ARC_ERRORS, {
   arc_bad_format: "Arc saves its data in a format Arclike doesn't recognize. Arc may have changed it.",
   too_large: "Your Arc sidebar is too big to import in one go.",
   arc_empty: "Arc has no pinned tabs or favorites to import.",
-};
+});
 
 function plural(n, word) {
   return n + " " + word + (n === 1 ? "" : "s");
