@@ -11,7 +11,7 @@ set -euo pipefail
 HOST="${ARCLIKE_WIN_HOST:-arclike-win}"
 ROOT="$(git rev-parse --show-toplevel)"
 SCENARIOS=("$@")
-[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(smoke command-bar switcher copy-url little-arc other-browser second-monitor arc-import multi-browser)
+[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(smoke command-bar switcher copy-url little-arc other-browser second-monitor two-windows arc-import multi-browser)
 PS="powershell -NoProfile -ExecutionPolicy Bypass"
 
 # Copy the working tree as one tar file, with uncommitted and untracked (not ignored) files. A

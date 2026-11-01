@@ -358,6 +358,7 @@ Each scenario starts a test browser on a fresh profile through `test/load-extens
 | `little-arc` | The command moves the tab to a Little Arc. Ctrl+O moves it back, with no Open File dialog. |
 | `other-browser` | Edge without the extension keeps Ctrl+T and Ctrl+Tab while Arclike runs for Chrome. |
 | `second-monitor` | The bar and the switcher open over Chrome on the second monitor. |
+| `two-windows` | With a tab moved into its own window, Ctrl+T in that window opens its search and its address in that window. |
 | `arc-import` | The app reads `test/fixtures/arc/StorableSidebar.json` (through `ARCLIKE_ARC_DIR`), and the extension's dry run counts it correctly. |
 | `multi-browser` | Chrome and Edge both run Arclike. The bar opens in Edge. After Chrome's host is killed, Edge's host takes the hook and Chrome starts a new host. |
 

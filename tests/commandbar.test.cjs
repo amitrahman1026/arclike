@@ -412,12 +412,34 @@ test('a search runs in a new tab or in the current one', async () => {
   let h = browser();
   await h.call(`commandBarOpen("new_tab")`);
   await h.call(`commandBarChoose({ item: { kind: "search", text: "rice" }, text: "rice" })`);
-  assert.deepStrictEqual(plain(h.searched), [{ text: 'rice', disposition: 'NEW_TAB' }]);
+  assert.deepStrictEqual(plain(h.created), [{ windowId: 1 }]);
+  assert.deepStrictEqual(plain(h.searched), [{ text: 'rice', tabId: 999 }]);
 
   h = browser();
   await h.call(`commandBarOpen("current_tab")`);
   await h.call(`commandBarChoose({ item: { kind: "search", text: "rice" }, text: "rice" })`);
   assert.deepStrictEqual(plain(h.searched), [{ text: 'rice', tabId: 10 }]);
+});
+
+// A tab dragged out of the strip makes a second window. When the bar hides, macOS can give the
+// focus back to the first window, so nothing may open in the window Chrome thinks is current.
+test('Cmd+T in a second window opens its choice there and focuses it again', async () => {
+  const twoWindows = () => load({ windows: [
+    win(1, [tab(10, { active: true, url: 'https://news.ycombinator.com/' })], false),
+    win(2, [tab(20, { active: true, url: 'https://example.com/' })], true),
+  ] });
+  let h = twoWindows();
+  await h.call(`commandBarOpen("new_tab")`);
+  await h.call(`commandBarChoose({ item: { kind: "search", text: "rice" }, text: "rice " })`);
+  assert.deepStrictEqual(plain(h.created), [{ windowId: 2 }]);
+  assert.deepStrictEqual(plain(h.searched), [{ text: 'rice', tabId: 999 }]);
+  assert.deepStrictEqual(plain(h.windowsFocused).pop(), { id: 2, props: { focused: true } });
+
+  h = twoWindows();
+  await h.call(`commandBarOpen("new_tab")`);
+  await h.call(`commandBarChoose({ item: { kind: "url", url: "https://example.org/" }, text: "example.org" })`);
+  assert.deepStrictEqual(plain(h.created), [{ windowId: 2, url: 'https://example.org/' }]);
+  assert.deepStrictEqual(plain(h.windowsFocused).pop(), { id: 2, props: { focused: true } });
 });
 
 test('Enter with nothing chosen opens the typed text, or a blank new tab', async () => {

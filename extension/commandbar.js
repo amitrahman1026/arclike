@@ -820,6 +820,7 @@ var commandBarChoose = async function(message) {
 		} else if (!item) {
 			if (newTab) {
 				await chrome.tabs.create({ windowId: target.windowId });
+				await commandBarFocusTarget(target);
 			}
 		} else if (item.kind === "command" && item.command) {
 			await commandBarRunCommand(item.command, target);
@@ -830,19 +831,31 @@ var commandBarChoose = async function(message) {
 		} else if (item.kind === "closed") {
 			await chrome.sessions.restore(item.sessionId);
 		} else if (item.kind === "search") {
-			if (newTab || target.tabId === null) {
-				await chrome.search.query({ text: item.text, disposition: "NEW_TAB" });
-			} else {
-				await chrome.search.query({ text: item.text, tabId: target.tabId });
+			// A search with disposition NEW_TAB opens in the window Chrome thinks is current. When
+			// the bar hides, macOS can give the focus to another window, such as the one a tab was
+			// dragged out of. So the search goes into a tab of the bar's own window.
+			var searchTabId = target.tabId;
+			if (newTab || searchTabId === null) {
+				searchTabId = (await chrome.tabs.create({ windowId: target.windowId })).id;
 			}
+			await chrome.search.query({ text: item.text, tabId: searchTabId });
+			await commandBarFocusTarget(target);
 		} else if (newTab || target.tabId === null) {
 			await chrome.tabs.create({ windowId: target.windowId, url: item.url });
+			await commandBarFocusTarget(target);
 		} else {
 			await chrome.tabs.update(target.tabId, { url: item.url });
+			await commandBarFocusTarget(target);
 		}
 	} catch (e) {
 		log("CommandBar::Could not open the choice: " + e.message);
 	}
+};
+
+// Give the focus back to the window the bar opened over, which macOS may have given to another
+// Chrome window when the bar hid.
+var commandBarFocusTarget = async function(target) {
+	await chrome.windows.update(target.windowId, { focused: true });
 };
 
 var commandBarRunCommand = async function(command, target) {
