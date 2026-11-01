@@ -1,6 +1,6 @@
 # Releasing Arclike to friends
 
-This plan lets a friend use Arclike without Xcode. The extension comes from the Chrome Web Store, and the Mac app comes as a DMG from GitHub Releases. Windows is a separate plan (`docs/windows-port.md`).
+This plan lets a friend use Arclike without Xcode or the .NET SDK. The extension comes from the Chrome Web Store. The Mac app comes as a DMG, and the Windows app as an installer, both from GitHub Releases. Section 3 covers Windows. How the Windows app was built and tested is in `docs/windows-port.md`.
 
 The recommended first release costs $5:
 
@@ -44,16 +44,16 @@ One consequence: Chrome cannot hold the unpacked copy and the Store copy at the 
 - **Category:** Productivity, Tools.
 - **Description:**
 
-  > Arclike makes tab switching in Chrome feel like Arc.
+  > Arclike makes tab switching in Chrome feel like Arc, on macOS and Windows.
   >
   > - Ctrl+Tab shows the tabs you visited recently, with thumbnails. Release Ctrl to switch.
-  > - Cmd+T and Cmd+L open a command bar that searches open tabs, bookmarks, and history, and runs tab commands.
-  > - Cmd+Shift+C copies the URL of the current tab.
+  > - Cmd+T and Cmd+L (Ctrl+T and Ctrl+L on Windows) open a command bar that searches open tabs, bookmarks, and history, and runs tab commands.
+  > - Cmd+Shift+C (Alt+Shift+C on Windows) copies the URL of the current tab.
   > - Import from Arc turns your Arc favorites, pinned tabs, and spaces into Chrome pinned tabs, bookmarks, and tab groups.
   >
-  > Arclike needs its free macOS companion app, which draws the switcher and the command bar and catches the keyboard shortcuts. Download it from https://github.com/amitrahman1026/arclike/releases. macOS 14 or later.
+  > Arclike needs its free companion app, which draws the switcher and the command bar and catches the keyboard shortcuts. Download it for macOS 14 or later, or for Windows 10 or 11, from https://github.com/amitrahman1026/arclike/releases.
   >
-  > Everything stays on your Mac. Arclike has no server and sends nothing.
+  > Everything stays on your computer. Arclike has no server and sends nothing.
 
 The Store's policy wants a dependency on other software to be clear in the description. The second paragraph does that.
 
@@ -67,12 +67,12 @@ The Store's policy wants a dependency on other software to be clear in the descr
 
 Expect an in-depth review because of `<all_urls>`, `history`, and native messaging. Clear justifications make it faster.
 
-**Single purpose:** "Arclike replaces Chrome's tab switching with an Arc-style Ctrl+Tab switcher and a Cmd+T / Cmd+L command bar, drawn by its companion macOS app."
+**Single purpose:** "Arclike replaces Chrome's tab switching with an Arc-style Ctrl+Tab switcher and a Cmd+T / Cmd+L command bar. Its companion app for macOS or Windows draws them."
 
 | Permission | Justification |
 |---|---|
 | `tabs` | Lists open tabs with titles and URLs for the Ctrl+Tab switcher and the command bar, and switches, moves, pins, and closes tabs on command. |
-| `nativeMessaging` | Talks to the Arclike macOS app on the same computer. The app catches the keyboard shortcuts and draws the switcher and the command bar. |
+| `nativeMessaging` | Talks to the Arclike app (macOS or Windows) on the same computer. The app catches the keyboard shortcuts and draws the switcher and the command bar. |
 | `activeTab` | See the note under this table. |
 | `storage` | Keeps settings and the recently visited tab order. |
 | `history` | The command bar searches pages visited in the last 90 days. |
@@ -88,7 +88,7 @@ Note on `activeTab`: the extension code does not call anything that needs it, an
 
 **Remote code:** "No, I am not using remote code."
 
-**Data usage:** Arclike reads web history, tab URLs and titles, and page screenshots, and sends them only to its own app on the same Mac. The form asks what the item "collects", and the Store docs do not say whether local-only handling counts. The safe answer is to tick **Web history** and **Website content**, and to let the privacy policy say that nothing leaves the Mac. Then tick the three certifications (no sale, no use unrelated to the single purpose, no use for credit decisions).
+**Data usage:** Arclike reads web history, tab URLs and titles, and page screenshots, and sends them only to its own app on the same computer. The form asks what the item "collects", and the Store docs do not say whether local-only handling counts. The safe answer is to tick **Web history** and **Website content**, and to let the privacy policy say that nothing leaves the computer. Then tick the three certifications (no sale, no use unrelated to the single purpose, no use for credit decisions).
 
 **Privacy policy URL:** <https://github.com/amitrahman1026/arclike/blob/arclike/PRIVACY.md>. The file is in this commit. Push it before you submit, or the link does not work.
 
@@ -154,11 +154,61 @@ Turn Sparkle on with the Developer ID release:
 
 ### Before the first DMG
 
-- Set the app version to 0.2.0 in `Info.plist` (both keys) and in `APP_VERSION`. 0.1.0 was the build-from-source release.
-- `DEBUG_LOGGING` is `true`, and the log records command bar query text and has no size limit. Mine is 578 KB after one day. For friends, turn file logging off by default, or remove the query text and limit the file size. `PRIVACY.md` describes the log as it is now. Update the policy if this changes.
+- The app version is 0.3.0 now (`APP_VERSION` and `Info.plist`). `build.sh` stops when the two disagree.
+- `DEBUG_LOGGING` is `true`. Since `c17e55c` the log moves aside at 2 MB, so its size has a limit. It still records command bar query text: the extension sends lines such as `CommandBar: answered "<query>"` to the app's log. This is the same on Windows. For friends, remove the query text from those extension lines, or turn file logging off by default. `PRIVACY.md` describes the log as it is now. Update the policy if this changes.
 - `install.sh` is upstream's old installer. It builds into `~/.arclike` and asks for an extension ID. Remove it, or point it to `install-local.sh`, so that nobody follows it.
 
-## 3. First run for a friend
+## 3. Windows app
+
+### Build
+
+From the Mac, with the Windows box set up (`docs/windows-port.md`, section 8):
+
+```bash
+native-host-windows/test/remote-test.sh            # tests first: the protocol test and every scenario
+native-host-windows/test/remote-test.sh installer  # writes native-host-windows/dist/Arclike-VERSION-Setup.exe
+shasum -a 256 native-host-windows/dist/Arclike-*-Setup.exe
+```
+
+On a Windows machine, `native-host-windows\build.ps1 -Installer` does the same. It needs the .NET 8 SDK and Inno Setup 6. The version comes from `Arclike.csproj`. Keep `Constants.AppVersion` the same.
+
+The installer:
+
+- installs for the current user only, into `%LOCALAPPDATA%\Programs\Arclike`, with no administrator prompt.
+- writes the native messaging manifest with a relative path and the exact extension origin.
+- registers the host for Chrome, Edge, Brave, Vivaldi and Chromium in `HKCU`.
+- closes a running `Arclike.exe` before it replaces it. The extension starts the new copy about a second later.
+- removes the files and the registry keys on uninstall. The log and settings in `%LOCALAPPDATA%\Arclike` stay.
+
+The app is self-contained, so a friend needs no .NET runtime. The exe is 155 MB and the installer 47 MB.
+
+### Signing
+
+The first Windows release is unsigned. Windows has no Accessibility-style permission, so signing changes nothing about how the app works. It changes only SmartScreen and antivirus reputation (`docs/windows-port.md`, section 6):
+
+- A downloaded unsigned installer shows "Windows protected your PC". The friend clicks **More info**, then **Run anyway**.
+- Microsoft Defender may flag an unsigned app that installs a keyboard hook. No test has shown this yet. If it happens, submit the file to Microsoft as a false positive.
+
+Azure Artifact Signing is the best fit for a public release. Sign both `Arclike.exe` and the installer. `build.ps1 -Sign` signs the exe with a certificate from the user's store. Signing the installer and an Artifact Signing setup are not written yet.
+
+### The Store ID on Windows
+
+When the manifest key changes to the Store's key (section 1), the unpacked ID becomes the Store ID. Change `jlmidbafifiahhcpahkcejphlibhjapo` to the Store ID in these places, then build and run the tests again:
+
+- `native-host-windows/Arclike/Constants.cs` (`ExtensionId`)
+- `native-host-windows/installer/setup.iss` (`ExtensionId`)
+- `native-host-windows/install-local.ps1`
+- `native-host-windows/test/lib.ps1`, `cdp.mjs` and `Test-Protocol.ps1`
+
+`git grep jlmidbafifiahhcpahkcejphlibhjapo` lists every place, on both platforms.
+
+### Auto-updates
+
+None. The Windows app has no update code, the same as the first macOS release. A friend downloads the new installer and runs it over the old copy.
+
+## 4. First run for a friend
+
+### macOS
 
 1. Open the Store link and click **Add to Chrome**.
 2. Download `Arclike-VERSION.dmg` from the GitHub release. Open it, and drag Arclike to Applications.
@@ -171,7 +221,18 @@ If nothing happens: check that the host manifest exists and names the Store ID, 
 
 To update, the friend downloads the new DMG, replaces the app, and clicks Open Anyway again. With the local identity or a Developer ID, Accessibility stays granted.
 
-## 4. Checklist
+### Windows
+
+1. Open the Store link and click **Add to Chrome**.
+2. Download `Arclike-VERSION-Setup.exe` from the GitHub release and open it. SmartScreen shows "Windows protected your PC". Click **More info**, then **Run anyway**.
+3. The installer needs no administrator rights. At the end it offers to open Arclike setup. That window shows which browsers have the host registered. The installer registers all of them, so nothing more is needed there.
+4. Restart Chrome, or wait a few seconds. The extension tries to connect every second, and Chrome starts `Arclike.exe` when it connects. Press Ctrl+Tab in Chrome. Ctrl+T and Ctrl+L open the command bar, and Alt+Shift+C copies the URL.
+
+If nothing happens: check that `%LOCALAPPDATA%\Programs\Arclike\com.amitrahman1026.arclike.json` exists and names the Store ID, and read `%LOCALAPPDATA%\Arclike\Arclike.log`. Arclike does not take keys in an elevated window, such as an app that runs as administrator.
+
+To update, the friend runs the new installer. To remove Arclike, use Settings > Apps > Installed apps.
+
+## 5. Checklist
 
 ### You (accounts, payments, keys, publishing)
 
@@ -182,26 +243,32 @@ To update, the friend downloads the new DMG, replaces the app, and clicks Open A
 5. Take the screenshots (section 1, Images).
 6. Make the Store item: upload the draft zip, and send the agent the item ID and the public key from **Package > View public key**.
 7. Fill in the listing and the Privacy practices tab from section 1. Set visibility to Unlisted, and submit for review.
-8. When the review passes, approve the GitHub release with the DMG.
+8. When the review passes, approve the GitHub release with the DMG and the Windows installer.
 9. Later, if you want no Gatekeeper warning, do these steps. They need your Apple ID password, so an agent cannot do them.
    - Join the Apple Developer Program ($99 a year).
    - Make a "Developer ID Application" certificate in Xcode (Settings > Accounts > Manage Certificates).
    - Make an app-specific password at account.apple.com.
    - Run `xcrun notarytool store-credentials Arclike --apple-id YOU --team-id TEAMID`.
+10. Later, if you want no SmartScreen warning on Windows, open an Azure Artifact Signing account and pass its identity validation. It needs payment and your identity documents, so an agent cannot do it.
 
 ### An agent
 
 1. Remove `activeTab`, and check the thumbnails (section 1).
-2. Fix logging, set the version to 0.2.0, and remove or replace `install.sh` (section 2, Before the first DMG).
+2. Remove the command bar query text from the extension's log lines, which reach the log on both platforms. Remove or replace `install.sh` (section 2, Before the first DMG).
 3. Make the draft zip with `./scripts/package-extension.sh`.
-4. When you send the Store ID and key: put the key in the manifest, and set `CWS_EXTENSION_ID` and `CWS_URL`. Bump the versions, run `install-local.sh`, and test your own Chrome with the new ID.
+4. When you send the Store ID and key: put the key in the manifest, and set `CWS_EXTENSION_ID` and `CWS_URL`. Change the ID in the Windows places too (section 3). Bump the versions, run `install-local.sh`, and test your own Chrome with the new ID. Run `native-host-windows/test/remote-test.sh` to test Windows with it.
 5. Resize the screenshots to 1280×800 and make the promo tile.
-6. Run `./native-host/build.sh`, mount the DMG, and check the app and its signature.
-7. Change the README install section for friends: the Store link, the DMG, and the Open Anyway step. Keep the build-from-source steps folded away.
-8. Write the release notes with the DMG checksum, and run `gh release create` with the DMG after you approve it.
-9. After a Developer ID exists: run `./native-host/build.sh --notarize`, and turn on Sparkle (section 2, Auto-updates).
+6. Run `./native-host/build.sh`, mount the DMG, and check the app and its signature. Run `native-host-windows/test/remote-test.sh installer` for the Windows installer.
+7. Download the Windows installer on the box through a browser, so that it has the Mark of the Web, and install it. Record what SmartScreen and Defender do, and fix the first-run steps in section 4 if they differ.
+8. Change the README install section for friends. Add the Store link, the DMG with the Open Anyway step, and the Windows installer with the Run anyway step. Keep the build-from-source steps folded away.
+9. Write the release notes with the checksums of the DMG and the installer, and run `gh release create` with both after you approve it.
+10. After a Developer ID exists: run `./native-host/build.sh --notarize`, and turn on Sparkle (section 2, Auto-updates).
 
 ## What was tested, and what was not
+
+Windows: `docs/windows-port.md`, section 10, lists what was tested on a real Windows 11 box, the installer included, and what was not.
+
+macOS:
 
 Tested on this Mac (macOS 26.5.2, Apple Silicon):
 

@@ -1,6 +1,6 @@
 # Arclike on Windows: port plan
 
-Status, 2026-11-01: the code for phases 1 to 3 and the test tools of phase 0 (section 9) is written. It builds on macOS. On a real Windows 11 box, the protocol test and the smoke scenario pass. Section 10 lists what was and was not verified.
+Status, 2026-11-01: phases 0 to 3 are done, and phase 5 has a working installer (section 9). The Windows app has the same features as the macOS app 0.3.0. On a real Windows 11 box, the protocol test and nine desktop scenarios pass. Section 10 lists what was and was not verified. The release steps are in `docs/release.md`, section 3.
 
 ## 1. Summary
 
@@ -336,12 +336,30 @@ Each scenario script saves a screenshot, the UIA dump and the Arclike log to `C:
 
 ### 7.6 Loop from the Mac
 
-1. Copy the tree: `git archive --format=tar HEAD | ssh arclike-win "tar -x -f - -C C:/arclike/src"`. Windows 10 and later include `tar.exe`. For uncommitted changes, archive `$(git stash create)` instead of `HEAD`. Check once that a binary pipe through SSH arrives intact.
-2. Build and install: `ssh arclike-win "powershell -File C:\arclike\src\native-host-windows\install-local.ps1"`.
-3. Run the scenarios through `Invoke-Interactive.ps1`.
-4. Copy `C:\arclike\test\out` back with `scp -r`.
+`native-host-windows/test/remote-test.sh` runs the loop. The SSH host is `arclike-win` (or `ARCLIKE_WIN_HOST`).
 
-Put the four steps in one script, for example `native-host-windows/test/remote-test.sh`.
+| Command | What it does |
+|---|---|
+| `remote-test.sh setup` | One time, and after a change to the probe or the Node scripts: publishes the probe, installs `puppeteer-core`, and registers the `ArclikeInteractive` task. |
+| `remote-test.sh` | Copies the tree, runs `install-local.ps1` for Chrome and Edge, runs `Test-Protocol.ps1`, then every scenario. Copies the evidence to `test/results/<time>/`. |
+| `remote-test.sh smoke switcher` | The same, with only the named scenarios. |
+| `remote-test.sh installer` | Builds `Arclike-VERSION-Setup.exe` on the box and copies it to `native-host-windows/dist/`. |
+
+The copy is a `git archive` of a temporary index. It includes uncommitted and untracked files, and leaves out ignored ones. The real index does not change.
+
+Each scenario starts a test browser on a fresh profile through `test/load-extension.mjs`, which loads the extension over a DevTools pipe. `test/cdp.mjs` then runs JavaScript in the extension's service worker, so a scenario can read the tabs, the active tab and the import result. The scenarios are in `test/scenarios/`:
+
+| Scenario | What it checks |
+|---|---|
+| `smoke` | Chrome starts the host. Ctrl+T opens the bar with focus. Esc gives the foreground back. Ctrl+Tab shows the switcher. |
+| `command-bar` | Enter on an open tab's row switches to it. A query that ends in a space opens a search. Ctrl+L opens an address in the current tab. |
+| `switcher` | Ctrl+Tab goes to the last tab. Ctrl+Esc cancels and does not open the Start menu. Release chooses the card under the mouse. |
+| `copy-url` | Alt+Shift+C puts the address on the clipboard. The toast does not take the foreground. |
+| `little-arc` | The command moves the tab to a Little Arc. Ctrl+O moves it back, with no Open File dialog. |
+| `other-browser` | Edge without the extension keeps Ctrl+T and Ctrl+Tab while Arclike runs for Chrome. |
+| `second-monitor` | The bar and the switcher open over Chrome on the second monitor. |
+| `arc-import` | The app reads `test/fixtures/arc/StorableSidebar.json` (through `ARCLIKE_ARC_DIR`), and the extension's dry run counts it correctly. |
+| `multi-browser` | Chrome and Edge both run Arclike. The bar opens in Edge. After Chrome's host is killed, Edge's host takes the hook and Chrome starts a new host. |
 
 ### 7.7 Things that break a headless box
 
@@ -416,14 +434,15 @@ Do these once, at the machine or through an existing remote tool. Windows 10 22H
 
 ## 9. Port phases
 
-| Phase | Work | Done when |
-|---|---|---|
-| 0 | Box setup (section 8). Register the interactive runner. Write the probe. | `screenshot` over SSH returns the desktop, and `foreground` names the active window. |
-| 1 | Restore `native-host-windows/` from `c4d5366`. Rebrand (3.2). Remove updates and the remote browser list. Fix the defects in 3.4. Add `install-local.ps1`. | Test levels 1 and 2 pass. Scenarios 1 and 2 pass. |
-| 2 | Switcher parity: show on first press, two-row layout, hover select, Ctrl+Esc, DPI and monitor placement, downsampled images. | Scenarios 3, 4, 5, 9, 10 and 11 pass. |
-| 3 | Command bar window, focus strategy, keys, rows and icons. Platform-aware hints in `extension/commandbar.js`. | Scenarios 6, 7 and 8 pass, and the log names the focus method that worked. |
-| 4 | Polish: scale test, toast, Windows 10 fallback styling. | Scenario 12 passes. |
-| 5 | Release: Inno Setup with the exact origin, signing choice, README section, a GitHub release asset. | A fresh Windows user can install from the release and pass scenarios 2, 3 and 6. |
+| Phase | Work | Done when | Status |
+|---|---|---|---|
+| 0 | Box setup (section 8). Register the interactive runner. Write the probe. | `screenshot` over SSH returns the desktop, and `foreground` names the active window. | Done |
+| 1 | Restore `native-host-windows/` from `c4d5366`. Rebrand (3.2). Remove updates and the remote browser list. Fix the defects in 3.4. Add `install-local.ps1`. | Test levels 1 and 2 pass. Scenarios 1 and 2 pass. | Done |
+| 2 | Switcher parity: show on first press, two-row layout, hover select, Ctrl+Esc, DPI and monitor placement, downsampled images. | Scenarios 3, 4, 5, 9, 10 and 11 pass. | Done, except a scale other than 100% |
+| 3 | Command bar window, focus strategy, keys, rows and icons. Platform-aware hints in `extension/commandbar.js`. | Scenarios 6, 7 and 8 pass, and the log names the focus method that worked. | Done |
+| 3b | macOS features added after the port started. Keys only in browsers with Arclike connected, Little Arc's Ctrl+O, Import from Arc, a log size cap. | The `other-browser`, `little-arc`, `arc-import` and `multi-browser` scenarios pass. | Done |
+| 4 | Polish: scale test, toast, Windows 10 fallback styling. | Scenario 12 passes. | Not started |
+| 5 | Release: Inno Setup with the exact origin, signing choice, README section, a GitHub release asset. | A fresh Windows user can install from the release and pass scenarios 2, 3 and 6. | Installer done. The release itself waits for the Store ID (`docs/release.md`, section 3). |
 
 Phases 2 and 3 touch different files after phase 1 lands, so they can run in parallel.
 
@@ -444,12 +463,25 @@ Verified on 2026-11-01, on Windows 11 Pro 24H2 (build 26100), Chrome 156, two 19
 - `Test-Protocol.ps1` passes 7 of 7 over SSH. WPF starts in session 0.
 - The scheduled-task runner runs jobs in the console session. Screenshots, `SendInput` and UI Automation work from it.
 - The smoke scenario passes. The hook sees injected keys. Ctrl+T opens the command bar, and the first focus step fails but `AttachThreadInput` works (`focused=True method=attach`). Typed text reaches the extension as queries. Esc closes the bar and Chrome gets the foreground back. Ctrl+Tab shows the switcher with thumbnails and never takes the foreground.
-- Bugs that the first run found and that are fixed: a stack overflow at start in `ShortcutsConfiguration` (it came from upstream, so upstream's build never started), and command bar rows and switcher cards that UI Automation could not see (a `Border` has no automation peer).
+- The first run found two bugs, now fixed:
+  - A stack overflow at start in `ShortcutsConfiguration`. It came from upstream, so upstream's build never started.
+  - UI Automation could not see command bar rows and switcher cards, because a `Border` has no automation peer.
+
+Verified later on 2026-11-01, on the same box:
+
+- The protocol test and all nine scenarios in section 7.6 pass in one run.
+- The installer. `Arclike-0.2.0-Setup.exe` (47 MB) installs silently for the user without elevation, into `%LOCALAPPDATA%\Programs\Arclike`. It writes the manifest with a relative path and sets the HKCU keys for Chrome, Edge, Brave, Vivaldi and Chromium. The protocol test and the smoke scenario pass against the installed copy. The silent uninstall removes the files and every key, and leaves an empty folder.
+- Arc for Windows keeps its data in `%LOCALAPPDATA%\Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc`. The box has Arc installed, but Arc never saved a sidebar there, so the real import answers `arc_not_found`. The import of a sidebar in Arc's format passes with the fixture.
+- The later runs found two more bugs, now fixed:
+  - The command bar closed itself when its own focus steps deactivated it for a moment.
+  - The app logged each command bar query in full.
 
 Not verified:
 
-- Per-monitor DPI at a scale other than 100%, and the switcher or bar on the second monitor.
-- Enter in the command bar, the hover selection in the switcher, copy URL, and leader handover between two browsers.
-- The hook in an elevated window, and Chrome as an installed user (not a test profile started by Puppeteer).
+- Per-monitor DPI at a scale other than 100%.
+- An import from a real Arc for Windows sidebar. The fixture follows the macOS format, and published Windows export tools read the same format.
+- The hook in an elevated window.
+- A download from a GitHub release: SmartScreen's prompt and Defender's reaction to an unsigned installer that installs a keyboard hook.
+- Windows 10.
 - The Chrome for Testing registry key, and Artifact Signing prices and eligibility.
 - Why upstream reverted the port.
