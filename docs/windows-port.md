@@ -1,6 +1,6 @@
 # Arclike on Windows: port plan
 
-Status, 2026-10-25: the code for phases 1 to 3 and the test tools of phase 0 (section 9) is written. It builds on macOS. It has not run on Windows yet. Section 10 lists what was and was not verified.
+Status, 2026-11-01: the code for phases 1 to 3 and the test tools of phase 0 (section 9) is written. It builds on macOS. On a real Windows 11 box, the protocol test and the smoke scenario pass. Section 10 lists what was and was not verified.
 
 ## 1. Summary
 
@@ -282,9 +282,10 @@ If the task approach fails, Sysinternals `PsExec -i 1` from an elevated SSH sess
 
 - Use a separate profile: `chrome.exe --user-data-dir=C:\arclike\test\profile --no-first-run --no-default-browser-check`. Since Chrome 136, `--remote-debugging-port` and `--remote-debugging-pipe` are ignored for the default profile. A test profile also keeps tests away from the user's own tabs.
 - Google Chrome 137 and later ignore `--load-extension`. Two ways remain:
-  - Load the extension once with the DevTools Protocol method `Extensions.loadUnpacked` (parameter `path`). Puppeteer exposes it as `browser.installExtension(path)` over a pipe connection. The unpacked extension then stays in the test profile. Check the exact flags this needs in the Puppeteer version you install.
+  - Load the extension with the DevTools Protocol method `Extensions.loadUnpacked` (parameter `path`). Puppeteer exposes it as `browser.installExtension(path)`. It needs `pipe: true` and `enableExtensions: true` (puppeteer-core 24.10.0 or later). The extension does not stay in the profile: after a normal restart it is gone, also with developer mode on. So `test/load-extension.mjs` starts the test Chrome and loads the extension on every start. This is what the tests use.
   - Use Chrome for Testing, which still accepts `--load-extension`. Check which registry key it reads for native hosts before you rely on it. This was not verified.
 - The extension ID stays `jlmidbafifiahhcpahkcejphlibhjapo` in every case, because the manifest `key` fixes it. The `allowed_origins` entry needs no change.
+- Chrome that a scheduled task starts does not get the foreground. `Start-TestChrome` calls `probe activate chrome` after the start.
 - Use the same DevTools connection to read state that the screen does not show: the active tab, the tab count and the tab order. A test then checks that Enter in the command bar opened one new tab with the expected URL.
 
 ### 7.4 Probe tool
@@ -297,6 +298,7 @@ Add a small console app, `native-host-windows/test/Probe` (`net8.0-windows`, `Pe
 | `keys <chord>...` | Sends key chords with `SendInput`, for example `ctrl+t`, `ctrl down`, `tab`, `ctrl up`. |
 | `type <text>` | Sends Unicode text with `KEYEVENTF_UNICODE`. |
 | `foreground` | Prints the foreground window's handle, process name, title and rectangle as JSON. |
+| `activate <process>` | Brings the process's main window to the foreground. A tap of Alt first gives the probe the last input, which `SetForegroundWindow` needs. |
 | `uia [--process Arclike]` | Prints the UI Automation tree (control type, `AutomationId`, `Name`, rectangle) as JSON. |
 | `wait <automationId> [--gone] [--timeout ms]` | Waits until an element appears or disappears. |
 
@@ -380,6 +382,8 @@ Do these once, at the machine or through an existing remote tool. Windows 10 22H
    winget install --id OpenJS.NodeJS.LTS -e
    ```
 
+   If winget reports that the Chrome installer hash does not match, Google has shipped a newer MSI than the winget manifest names. Download `https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi`, check that `Get-AuthenticodeSignature` shows a valid Google LLC signature, and run `msiexec /i <file> /qn`.
+
 5. Turn on auto-logon with Sysinternals Autologon (`learn.microsoft.com/sysinternals/downloads/autologon`). It stores the password as an LSA secret. The registry method (`AutoAdminLogon` and `DefaultPassword` under `Winlogon`) stores it in plain text. Type the password yourself. Do not send it to an agent.
 6. Turn off sleep, the display timeout and the screen saver:
 
@@ -432,10 +436,20 @@ Verified on 2026-10-25, on macOS:
 - Chrome native messaging rules in section 5 come from Chrome's documentation. The `cmd.exe` launch comes from Chromium sources and the `NativeHostsExecutablesLaunchDirectly` policy notes.
 - The `--load-extension` removal (Chrome 137) and the remote debugging change (Chrome 136) come from Chromium's announcements. `Extensions.loadUnpacked` exists in the current DevTools Protocol definition, with parameters `path` and `enableInIncognito`.
 - The build. With the .NET 8 SDK (8.0.426, installed user-local in `~/.dotnet8`), `dotnet build native-host-windows/Arclike.sln -p:EnableWindowsTargeting=true` builds the app, the probe and the tests with 0 warnings. With only SDK 3.1.300 it fails at restore ("Invalid target framework 'unsupported'").
-- `dotnet test native-host-windows/Arclike.Tests` passes 17 tests on macOS (switcher layout, command bar row parsing, highlighting, tips, glyphs).
+- `dotnet test native-host-windows/Arclike.Tests` passes 19 tests on macOS (switcher layout, command bar row parsing, highlighting, tips, glyphs, shortcut defaults).
+
+Verified on 2026-11-01, on Windows 11 Pro 24H2 (build 26100), Chrome 156, two 1920x1080 monitors at 100%, over SSH through Tailscale:
+
+- `install-local.ps1` publishes the app, writes the manifest and sets the HKCU key. Chrome then starts `Arclike.exe` through `cmd.exe` with the origin and `--parent-window=0`. Parent detection finds Chrome one level up.
+- `Test-Protocol.ps1` passes 7 of 7 over SSH. WPF starts in session 0.
+- The scheduled-task runner runs jobs in the console session. Screenshots, `SendInput` and UI Automation work from it.
+- The smoke scenario passes. The hook sees injected keys. Ctrl+T opens the command bar, and the first focus step fails but `AttachThreadInput` works (`focused=True method=attach`). Typed text reaches the extension as queries. Esc closes the bar and Chrome gets the foreground back. Ctrl+Tab shows the switcher with thumbnails and never takes the foreground.
+- Bugs that the first run found and that are fixed: a stack overflow at start in `ShortcutsConfiguration` (it came from upstream, so upstream's build never started), and command bar rows and switcher cards that UI Automation could not see (a `Border` has no automation peer).
 
 Not verified:
 
-- Anything that runs on Windows. That includes the hook, the focus steps in 4.3, WPF in session 0 and the scheduled-task runner. It also includes capture of layered windows, `SendInput` into Chrome and UI Automation of Chrome.
-- The Chrome for Testing registry key, the exact flags Puppeteer needs for `installExtension`, and Artifact Signing prices and eligibility.
+- Per-monitor DPI at a scale other than 100%, and the switcher or bar on the second monitor.
+- Enter in the command bar, the hover selection in the switcher, copy URL, and leader handover between two browsers.
+- The hook in an elevated window, and Chrome as an installed user (not a test profile started by Puppeteer).
+- The Chrome for Testing registry key, and Artifact Signing prices and eligibility.
 - Why upstream reverted the port.
