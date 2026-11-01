@@ -420,7 +420,7 @@ namespace Arclike.Views
                 grid.Children.Add(hint);
             }
 
-            var row = new Border { CornerRadius = new CornerRadius(10), Child = grid, Background = Brushes.Transparent, Cursor = Cursors.Hand };
+            var row = new AutomationBorder { CornerRadius = new CornerRadius(10), Child = grid, Background = Brushes.Transparent, Cursor = Cursors.Hand };
             System.Windows.Automation.AutomationProperties.SetAutomationId(row, "CommandBarRow");
             System.Windows.Automation.AutomationProperties.SetName(row, item.Title);
             int index = item.Index;
