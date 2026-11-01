@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "sidebar": {
+    "containers": [
+      { "global": {} },
+      {
+        "topAppsContainerIDs": [{ "default": true }, "favorites"],
+        "spaces": [
+          "space1",
+          { "id": "space1", "title": "Work", "containerIDs": ["pinned", "pinned1", "unpinned", "unpinned1"] }
+        ],
+        "items": [
+          "favorites", { "id": "favorites", "childrenIds": ["fav1"], "data": { "itemContainer": { "containerType": { "topApps": {} } } } },
+          "fav1", { "id": "fav1", "childrenIds": [], "data": { "tab": { "savedURL": "https://www.wikipedia.org/", "savedTitle": "Wikipedia" } } },
+          "pinned1", { "id": "pinned1", "childrenIds": ["tab1", "folder1"], "data": { "itemContainer": { "containerType": { "spaceItems": {} } } } },
+          "tab1", { "id": "tab1", "childrenIds": [], "data": { "tab": { "savedURL": "https://example.com/", "savedTitle": "Example Domain" } } },
+          "folder1", { "id": "folder1", "title": "Docs", "childrenIds": ["tab2"], "data": { "list": {} } },
+          "tab2", { "id": "tab2", "childrenIds": [], "data": { "tab": { "savedURL": "https://www.iana.org/", "savedTitle": "IANA" } } },
+          "unpinned1", { "id": "unpinned1", "childrenIds": ["tab3"], "data": { "itemContainer": { "containerType": { "spaceItems": {} } } } },
+          "tab3", { "id": "tab3", "childrenIds": [], "data": { "tab": { "savedURL": "https://www.mozilla.org/", "savedTitle": "Mozilla" } } }
+        ]
+      }
+    ]
+  }
+}

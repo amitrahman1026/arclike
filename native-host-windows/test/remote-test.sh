@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build, install and test the Windows app on the headless Windows box, from the Mac.
-#   native-host-windows/test/remote-test.sh            protocol test and the smoke scenario
+#   native-host-windows/test/remote-test.sh            protocol test and every scenario
 #   native-host-windows/test/remote-test.sh smoke ...  named scenarios from test/scenarios
 #   native-host-windows/test/remote-test.sh setup      one-time: probe, puppeteer-core, the task
 # Needs an SSH host entry (default name arclike-win, or set ARCLIKE_WIN_HOST) and a one-time run
@@ -10,7 +10,7 @@ set -euo pipefail
 HOST="${ARCLIKE_WIN_HOST:-arclike-win}"
 ROOT="$(git rev-parse --show-toplevel)"
 SCENARIOS=("$@")
-[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(smoke)
+[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(smoke command-bar switcher copy-url little-arc other-browser second-monitor arc-import)
 PS="powershell -NoProfile -ExecutionPolicy Bypass"
 
 # Copy the working tree as one tar file, with uncommitted and untracked (not ignored) files. A

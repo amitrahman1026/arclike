@@ -8,10 +8,11 @@ New-Item -ItemType Directory -Force -Path (Join-Path $Root "out") | Out-Null
 dotnet publish (Join-Path $PSScriptRoot "Probe\Probe.csproj") -c Release -o (Join-Path $Root "probe")
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish of the probe failed" }
 
-# load-extension.mjs and puppeteer-core start the test Chrome with the extension (lib.ps1).
+# load-extension.mjs starts the test Chrome with the extension, and cdp.mjs reads its tabs
+# (lib.ps1). Both need puppeteer-core next to them.
 $NodeDir = Join-Path $Root "node"
 New-Item -ItemType Directory -Force -Path $NodeDir | Out-Null
-Copy-Item (Join-Path $PSScriptRoot "load-extension.mjs") $NodeDir -Force
+Copy-Item (Join-Path $PSScriptRoot "*.mjs") $NodeDir -Force
 npm install --prefix $NodeDir --no-audit --no-fund puppeteer-core@24.10.0
 if ($LASTEXITCODE -ne 0) { throw "npm install of puppeteer-core failed" }
 

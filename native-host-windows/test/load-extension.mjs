@@ -16,7 +16,10 @@ const browser = await puppeteer.launch({
     enableExtensions: true,
     headless: false,
     defaultViewport: null,
-    args: ["--no-first-run", "--no-default-browser-check", "--hide-crash-restore-bubble", "--start-maximized"],
+    // Port 9333 is for cdp.mjs, which reads the tabs while the test runs. The window always
+    // starts on the primary monitor, whatever the profile remembers.
+    args: ["--no-first-run", "--no-default-browser-check", "--hide-crash-restore-bubble", "--start-maximized",
+        "--window-position=0,0", "--remote-debugging-port=9333"],
 });
 const id = await browser.installExtension(extension);
 
