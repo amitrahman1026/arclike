@@ -213,7 +213,7 @@ None. The Windows app has no update code, the same as the first macOS release. A
 1. Open the Store link and click **Add to Chrome**.
 2. Download `Arclike-VERSION.dmg` from the GitHub release. Open it, and drag Arclike to Applications.
 3. Open Arclike from Applications. macOS blocks it. Open System Settings > Privacy & Security, scroll to Security, click **Open Anyway**, and confirm with Touch ID or the password. The button shows for about an hour after the blocked launch.
-4. The setup window opens. Select Google Chrome and click **Enable**. The app writes `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.amitrahman1026.arclike.json`, with the path to its own binary and the Store ID in `allowed_origins`.
+4. The setup window opens. Select Google Chrome and click **Enable**. The app writes `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.amitrahman1026.arclike.json`, with the path to its own binary and the Store ID in `allowed_origins`. The app writes it only when it runs from `/Applications` or `~/Applications`. A copy opened from the DMG window, or from Downloads, shows an alert that asks the friend to move it first.
 5. macOS asks for Accessibility. Turn on Arclike in System Settings > Privacy & Security > Accessibility, then quit and open Arclike again, as the app's alert says.
 6. The extension tries to connect every second, so Chrome launches the app as its native host without a restart. Press Ctrl+Tab in Chrome.
 

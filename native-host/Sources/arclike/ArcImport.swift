@@ -100,6 +100,11 @@ func arcImportResponse(requestId: Any?) -> [String: Any] {
 
     func fail(_ code: String, _ detail: String) -> [String: Any] {
         debugLog("Arc import: \(code): \(detail)")
+        // A failure carries no data. A too_large reply that kept the sidebar would itself pass
+        // Chrome's 1 MB limit, and Chrome would close the connection instead of showing it.
+        for key in ["sidebar", "extensions", "rankingPicks"] {
+            response.removeValue(forKey: key)
+        }
         response["ok"] = false
         response["error"] = code
         response["detail"] = detail

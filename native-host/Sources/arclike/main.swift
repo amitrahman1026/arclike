@@ -391,6 +391,10 @@ class BrowserConfigManager: ObservableObject {
     }
     
     func enableBrowser(id: String) {
+        guard appIsInApplicationsFolder() else {
+            showMoveToApplicationsAlert()
+            return
+        }
         if let index = browsers.firstIndex(where: { $0.id == id }) {
             browsers[index].isEnabled = true
             saveConfig()
@@ -412,6 +416,11 @@ class BrowserConfigManager: ObservableObject {
     }
     
     func updateManifests() {
+        // A manifest that names a copy outside Applications breaks once that copy is gone.
+        guard appIsInApplicationsFolder() else {
+            debugLog("Not writing host manifests: the app runs from \(Bundle.main.bundlePath), not from Applications")
+            return
+        }
         // Use the actual path of the running app binary, not hardcoded path
         let nativeHostPath: String
         if let bundlePath = Bundle.main.executablePath {
@@ -1595,17 +1604,12 @@ struct AsyncFaviconView: View {
         }
     }
     
+    /// The extension sends the favicon as a data URL from Chrome's own cache. Anything else is
+    /// left as the globe: the app makes no network requests.
     private func loadFavicon() {
-        guard !url.isEmpty, let faviconURL = URL(string: url) else { return }
-        
-        URLSession.shared.dataTask(with: faviconURL) { data, _, _ in
-            if let data = data,
-               let loadedImage = downsampleImage(data, maxPixelSize: 72) ?? NSImage(data: data) {
-                DispatchQueue.main.async {
-                    self.image = loadedImage
-                }
-            }
-        }.resume()
+        guard url.hasPrefix("data:"), let comma = url.firstIndex(of: ","),
+              let data = Data(base64Encoded: String(url[url.index(after: comma)...])) else { return }
+        image = downsampleImage(data, maxPixelSize: 72)
     }
 }
 
@@ -2765,9 +2769,19 @@ func readMessage() -> [String: Any]? {
     }
     
     let length = lengthData.withUnsafeBytes { $0.load(as: UInt32.self).littleEndian }
-    guard length > 0 && length < 10 * 1024 * 1024 else { 
-        debugLog("Invalid message length: \(length)")
-        return nil 
+    guard length > 0 else {
+        debugLog("Empty message")
+        return nil
+    }
+    // Chrome sends at most 64 MiB. A larger length means the stream is out of step, and every
+    // later read would start in the middle of a message, so stop as on EOF.
+    guard length <= 64 * 1024 * 1024 else {
+        stdinClosed = true
+        debugLog("Invalid message length: \(length) - exiting")
+        DispatchQueue.main.async {
+            NSApplication.shared.terminate(nil)
+        }
+        return nil
     }
     
     let messageData = FileHandle.standardInput.readData(ofLength: Int(length))
@@ -2908,7 +2922,8 @@ func handleMessage(_ message: [String: Any]) {
 
     case "url_copied":
         if let url = message["url"] as? String {
-            debugLog("Received URL to copy: \(url)")
+            // The URL stays out of the log, as on Windows: it can hold a token or a search.
+            debugLog("Received URL to copy")
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
             pasteboard.setString(url, forType: .string)
@@ -3134,56 +3149,46 @@ func detectParentBrowser() -> (String, pid_t)? {
 // Lock file for event tap coordination - only one native host should have the event tap
 let eventTapLockFile = appSupportDirectory.appendingPathComponent("eventtap.lock")
 
+// The leader holds an exclusive flock on the lock file for as long as it runs. Taking it is one
+// atomic step, so two hosts that start together cannot both win, as they could when each checked
+// for a PID file and then wrote one. The kernel drops the lock when its owner dies, so a crashed
+// leader leaves nothing stale, like the named mutex on Windows. The file itself stays.
+var eventTapLockDescriptor: Int32 = -1
+
 // Check if we should be the event tap leader (first one to claim the lock)
 func tryBecomeEventTapLeader() -> Bool {
     let myPid = getpid()
-    
-    // Check if lock file exists
-    if FileManager.default.fileExists(atPath: eventTapLockFile.path) {
-        // Read existing PID
-        if let contents = try? String(contentsOf: eventTapLockFile, encoding: .utf8),
-           let existingPid = Int32(contents.trimmingCharacters(in: .whitespacesAndNewlines)) {
-            // Check if that process is still running AND is actually Tab Switcher
-            if kill(existingPid, 0) == 0 {
-                // Process exists, but verify it's actually Tab Switcher
-                if let app = NSRunningApplication(processIdentifier: existingPid),
-                   app.bundleIdentifier == Bundle.main.bundleIdentifier {
-                    // It's actually our app - we're not the leader
-                    debugLog("Another Tab Switcher instance (PID \(existingPid)) owns the event tap, we (PID \(myPid)) will listen only")
-                    return false
-                } else {
-                    // PID exists but it's not Tab Switcher - stale lock file
-                    debugLog("Lock file has PID \(existingPid) but it's not Tab Switcher - removing stale lock")
-                    try? FileManager.default.removeItem(at: eventTapLockFile)
-                }
-            } else {
-                // Process doesn't exist - stale lock file
-                debugLog("Lock file has dead PID \(existingPid) - removing stale lock")
-                try? FileManager.default.removeItem(at: eventTapLockFile)
-            }
-        } else {
-            // Couldn't read PID from lock file - remove it
-            debugLog("Lock file exists but couldn't read PID - removing")
-            try? FileManager.default.removeItem(at: eventTapLockFile)
-        }
-    }
-    
-    // Claim the lock
-    do {
-        try String(myPid).write(to: eventTapLockFile, atomically: true, encoding: .utf8)
-        debugLog("We (PID \(myPid)) are now the event tap leader")
+    if eventTapLockDescriptor >= 0 {
         return true
-    } catch {
-        debugLog("Failed to write lock file: \(error)")
+    }
+    let fd = open(eventTapLockFile.path, O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+    guard fd >= 0 else {
+        debugLog("Failed to open lock file: errno \(errno)")
         return false
     }
+    guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+        close(fd)
+        debugLog("Another instance owns the event tap, we (PID \(myPid)) will listen only")
+        return false
+    }
+    eventTapLockDescriptor = fd
+    // The PID is only for a person reading the file. The lock is what counts.
+    ftruncate(fd, 0)
+    let pidText = "\(myPid)\n"
+    _ = pidText.withCString { write(fd, $0, strlen($0)) }
+    debugLog("We (PID \(myPid)) are now the event tap leader")
+    return true
 }
 
 // Clean up lock file on exit and notify listeners to take over
 func cleanupEventTapLock() {
     if isEventTapLeader {
-        try? FileManager.default.removeItem(at: eventTapLockFile)
-        debugLog("Cleaned up event tap lock file")
+        if eventTapLockDescriptor >= 0 {
+            flock(eventTapLockDescriptor, LOCK_UN)
+            close(eventTapLockDescriptor)
+            eventTapLockDescriptor = -1
+        }
+        debugLog("Released the event tap lock")
         
         // Notify other instances that the leader has resigned
         // They should try to become the new leader
@@ -3421,29 +3426,11 @@ func setupNotificationListener() {
                 timer.invalidate()
                 return
             }
-            // Check if the current leader is still alive
-            if FileManager.default.fileExists(atPath: eventTapLockFile.path) {
-                if let contents = try? String(contentsOf: eventTapLockFile, encoding: .utf8),
-                   let leaderPid = Int32(contents.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                    // Check if leader is still running
-                    if kill(leaderPid, 0) != 0 {
-                        debugLog("Detected dead leader (PID \(leaderPid)), attempting to take over")
-                        if tryBecomeEventTapLeader() {
-                            isEventTapLeader = true
-                            if setupEventTap() {
-                                debugLog("Successfully became event tap leader after detecting dead leader")
-                            }
-                        }
-                    }
-                }
-            } else {
-                // No lock file exists, try to become leader
-                debugLog("No lock file exists, attempting to become leader")
-                if tryBecomeEventTapLeader() {
-                    isEventTapLeader = true
-                    if setupEventTap() {
-                        debugLog("Successfully became event tap leader (no previous lock file)")
-                    }
+            // The lock is free only once the leader is gone, whether it resigned or died.
+            if tryBecomeEventTapLeader() {
+                isEventTapLeader = true
+                if setupEventTap() {
+                    debugLog("Successfully became event tap leader after the previous one left")
                 }
             }
         }
@@ -3847,6 +3834,24 @@ func checkAccessibilityPermission(prompt: Bool = false) -> Bool {
         debugLog("Accessibility check (no prompt): \(trusted)")
         return trusted
     }
+}
+
+/// Chrome starts the app from the path in the host manifest. A copy opened from the disk image,
+/// or a downloaded copy that macOS runs from a random folder until it is moved (App
+/// Translocation), is gone after an eject or a restart, and Chrome then cannot start Arclike.
+func appIsInApplicationsFolder() -> Bool {
+    let path = Bundle.main.bundleURL.resolvingSymlinksInPath().path
+    let home = FileManager.default.homeDirectoryForCurrentUser.resolvingSymlinksInPath().path
+    return path.hasPrefix("/Applications/") || path.hasPrefix(home + "/Applications/")
+}
+
+func showMoveToApplicationsAlert() {
+    let alert = NSAlert()
+    alert.messageText = "Move \(APP_NAME) to Applications"
+    alert.informativeText = "\(APP_NAME) runs from \(Bundle.main.bundlePath). Chrome could not start it from there after you eject the disk image or restart.\n\nQuit \(APP_NAME), drag it to the Applications folder, and open it from there."
+    alert.alertStyle = .warning
+    alert.addButton(withTitle: "OK")
+    alert.runModal()
 }
 
 // Show accessibility permission alert
