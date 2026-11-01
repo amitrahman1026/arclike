@@ -1,6 +1,6 @@
 # Smoke scenario, run in the desktop session: Chrome starts the host, Ctrl+T opens the command
 # bar with focus, typing reaches it, Esc closes it and gives the foreground back to Chrome, and
-# Ctrl+Tab shows the switcher. Run through Invoke-Interactive.ps1. Not yet run on Windows.
+# Ctrl+Tab shows the switcher. Run through Invoke-Interactive.ps1.
 . C:\arclike\src\native-host-windows\test\lib.ps1
 $Scenario = "smoke"
 

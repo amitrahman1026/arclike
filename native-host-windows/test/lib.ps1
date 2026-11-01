@@ -44,6 +44,8 @@ function Start-TestChrome([string[]]$Urls = @("about:blank")) {
     Wait-Until { Test-Path $ready } -TimeoutMs 30000 -What "Chrome to start with the extension"
     $id = Get-Content $ready -Raw
     if ($id.Trim() -ne $ExtensionId) { throw "Chrome loaded the extension as $id, not $ExtensionId" }
+    # Chrome started from a scheduled task does not get the foreground by itself.
+    Probe activate chrome | Out-Null
 }
 
 function Stop-TestChrome {

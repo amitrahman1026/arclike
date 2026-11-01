@@ -26,6 +26,10 @@ else { throw "Pass -ScriptPath or -Command" }
 New-Item -ItemType Directory -Force -Path $Out | Out-Null
 Remove-Item (Join-Path $Out "stdout.txt"), (Join-Path $Out "stderr.txt"), (Join-Path $Out "exitcode.txt") -ErrorAction SilentlyContinue
 
+# The task ignores a start while an instance runs. A job that timed out can leave one behind.
+if ((Get-ScheduledTask -TaskName "ArclikeInteractive").State -eq "Running") {
+    Stop-ScheduledTask -TaskName "ArclikeInteractive"
+}
 Start-ScheduledTask -TaskName "ArclikeInteractive"
 $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 while (-not (Test-Path (Join-Path $Out "exitcode.txt"))) {

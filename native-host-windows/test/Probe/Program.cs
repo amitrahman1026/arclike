@@ -51,6 +51,7 @@ namespace Arclike.Probe
                     "hover" => Hover(args[1], args.Length > 2 && int.TryParse(args[2], out var i) ? i : 0),
                     "click" => Click(),
                     "foreground" => Foreground(),
+                    "activate" => Activate(args[1]),
                     "uia" => Uia(Option(args, "--process") ?? "Arclike", int.Parse(Option(args, "--depth") ?? "8")),
                     "wait" => Wait(args[1], args.Contains("--gone"), int.Parse(Option(args, "--timeout") ?? "5000")),
                     _ => Fail($"unknown command {args[0]}")
@@ -95,15 +96,23 @@ namespace Arclike.Probe
                 WorkingDirectory = dir
             };
             int exitCode;
+            var stdout = new StringBuilder();
+            var stderr = new StringBuilder();
             using (var process = Process.Start(psi)!)
             {
-                var stdout = process.StandardOutput.ReadToEndAsync();
-                var stderr = process.StandardError.ReadToEndAsync();
-                process.WaitForExit();
-                File.WriteAllText(Path.Combine(outDir, "stdout.txt"), stdout.Result);
-                File.WriteAllText(Path.Combine(outDir, "stderr.txt"), stderr.Result);
+                process.OutputDataReceived += (_, e) => { if (e.Data != null) lock (stdout) stdout.AppendLine(e.Data); };
+                process.ErrorDataReceived += (_, e) => { if (e.Data != null) lock (stderr) stderr.AppendLine(e.Data); };
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+                // A process the job leaves running, such as the test Chrome, inherits the pipes, so
+                // they never reach EOF. WaitForExit() would wait for that EOF, the timed overload
+                // does not. The pause lets the readers take the last lines.
+                while (!process.WaitForExit(250)) { }
+                Thread.Sleep(500);
                 exitCode = process.ExitCode;
             }
+            lock (stdout) File.WriteAllText(Path.Combine(outDir, "stdout.txt"), stdout.ToString());
+            lock (stderr) File.WriteAllText(Path.Combine(outDir, "stderr.txt"), stderr.ToString());
             File.WriteAllText(Path.Combine(outDir, "exitcode.txt"), exitCode.ToString());
             return exitCode;
         }
@@ -287,6 +296,24 @@ namespace Arclike.Probe
             return 0;
         }
 
+        /// <summary>
+        /// Bring the main window of a process to the foreground, as a click on it would. Windows
+        /// refuses SetForegroundWindow to a process without the last input, which is the case for
+        /// a Chrome that the test started. A tap of Alt first gives this process the last input.
+        /// </summary>
+        private static int Activate(string processName)
+        {
+            var hwnd = Process.GetProcessesByName(processName)
+                .Select(p => p.MainWindowHandle).FirstOrDefault(h => h != IntPtr.Zero);
+            if (hwnd == IntPtr.Zero) return Fail($"no window for {processName}");
+            if (IsIconic(hwnd)) ShowWindow(hwnd, SW_RESTORE);
+            SendKey(VK_MENU, up: false);
+            SendKey(VK_MENU, up: true);
+            SetForegroundWindow(hwnd);
+            Thread.Sleep(200);
+            return GetForegroundWindow() == hwnd ? 0 : Fail($"{processName} did not take the foreground");
+        }
+
         // ---- UI Automation ----
 
         private static IEnumerable<AutomationElement> TopLevelWindows(string processName)
@@ -394,6 +421,11 @@ namespace Arclike.Probe
         [DllImport("user32.dll")] private static extern uint MapVirtualKey(uint code, uint mapType);
         [DllImport("user32.dll")] private static extern int GetSystemMetrics(int index);
         [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
+        [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
+        [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int command);
+        private const int SW_RESTORE = 9;
+        private const ushort VK_MENU = 0x12;
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
         [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
