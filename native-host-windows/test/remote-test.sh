@@ -10,7 +10,7 @@ set -euo pipefail
 HOST="${ARCLIKE_WIN_HOST:-arclike-win}"
 ROOT="$(git rev-parse --show-toplevel)"
 SCENARIOS=("$@")
-[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(smoke command-bar switcher copy-url little-arc other-browser second-monitor arc-import)
+[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(smoke command-bar switcher copy-url little-arc other-browser second-monitor arc-import multi-browser)
 PS="powershell -NoProfile -ExecutionPolicy Bypass"
 
 # Copy the working tree as one tar file, with uncommitted and untracked (not ignored) files. A
@@ -31,7 +31,7 @@ if [ "${SCENARIOS[0]}" = setup ]; then
 fi
 
 echo "== install"
-ssh "$HOST" "$PS -File C:\\arclike\\src\\native-host-windows\\install-local.ps1"
+ssh "$HOST" "$PS -File C:\\arclike\\src\\native-host-windows\\install-local.ps1 -Browsers Chrome,Edge"
 
 echo "== protocol"
 ssh "$HOST" "$PS -File C:\\arclike\\src\\native-host-windows\\test\\Test-Protocol.ps1"

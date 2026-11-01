@@ -33,32 +33,48 @@ function Get-ChromePath {
     throw "Chrome not found"
 }
 
-# Start Chrome on the test profile with the extension loaded and the given URLs as tabs. Chrome
-# 137 and later ignore --load-extension, so load-extension.mjs loads it over a DevTools pipe on
-# every start. See docs/windows-port.md, 7.3.
-function Start-TestChrome([string[]]$Urls = @("about:blank")) {
-    Stop-TestChrome
+# Start a test browser on a fresh profile with the extension loaded and the given URLs as tabs.
+# Chrome 137 and later ignore --load-extension, so load-extension.mjs loads it over a DevTools
+# pipe on every start. See docs/windows-port.md, 7.3. Each browser gets its own DevTools port.
+function Start-TestBrowser([string]$Exe, [string]$ProfileDir, [int]$Port, [string[]]$Urls, [string]$ProcessName) {
+    Stop-TestBrowser $ProfileDir
     # A fresh profile every time. A kept one remembers history and the window's place, and keeps
     # the extension's service worker scripts from an earlier run even after they change.
     Start-Sleep -Milliseconds 500
-    Remove-Item $TestProfile -Recurse -Force -ErrorAction SilentlyContinue
-    $ready = Join-Path $ResultsRoot "chrome-ready.txt"
+    Remove-Item $ProfileDir -Recurse -Force -ErrorAction SilentlyContinue
+    $ready = Join-Path $ResultsRoot "ready-$Port.txt"
     Remove-Item $ready -ErrorAction SilentlyContinue
-    $nodeArgs = @("C:\arclike\test\node\load-extension.mjs", (Get-ChromePath), $TestProfile, "C:\arclike\src\extension", $ready) + $Urls
+    $env:ARCLIKE_CDP_PORT = $Port
+    $nodeArgs = @("C:\arclike\test\node\load-extension.mjs", $Exe, $ProfileDir, "C:\arclike\src\extension", $ready) + $Urls
     Start-Process -FilePath "node" -ArgumentList (Join-Arguments $nodeArgs) -NoNewWindow `
-        -RedirectStandardError (Join-Path $ResultsRoot "chrome-node.log") | Out-Null
-    Wait-Until { Test-Path $ready } -TimeoutMs 30000 -What "Chrome to start with the extension"
+        -RedirectStandardError (Join-Path $ResultsRoot "node-$Port.log") | Out-Null
+    $env:ARCLIKE_CDP_PORT = $null
+    Wait-Until { Test-Path $ready } -TimeoutMs 30000 -What "$ProcessName to start with the extension"
     $id = Get-Content $ready -Raw
-    if ($id.Trim() -ne $ExtensionId) { throw "Chrome loaded the extension as $id, not $ExtensionId" }
-    # Chrome started from a scheduled task does not get the foreground by itself.
-    Probe activate chrome | Out-Null
+    if ($id.Trim() -ne $ExtensionId) { throw "$ProcessName loaded the extension as $id, not $ExtensionId" }
+    # A browser started from a scheduled task does not get the foreground by itself.
+    Probe activate $ProcessName | Out-Null
 }
+
+function Stop-TestBrowser([string]$ProfileDir) {
+    Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe' OR Name = 'msedge.exe'" |
+        Where-Object { $_.CommandLine -like "*$ProfileDir*" } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
+function Start-TestChrome([string[]]$Urls = @("about:blank")) {
+    Start-TestBrowser (Get-ChromePath) $TestProfile 9333 $Urls "chrome"
+}
+
+function Stop-TestChrome { Stop-TestBrowser $TestProfile }
 
 # Evaluate a JavaScript expression in the extension's service worker and return the result.
 # Example: (Invoke-Extension "chrome.tabs.query({active: true, currentWindow: true})")[0].url
-function Invoke-Extension([string]$Expression) {
+function Invoke-Extension([string]$Expression, [int]$Port = 9333) {
     $encoded = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($Expression))
+    $env:ARCLIKE_CDP_PORT = $Port
     $json = & node "C:\arclike\test\node\cdp.mjs" $encoded
+    $env:ARCLIKE_CDP_PORT = $null
     if ($LASTEXITCODE -ne 0) { throw "cdp.mjs failed for: $Expression" }
     # Windows PowerShell's ConvertFrom-Json writes an array as one object. Returning it from a
     # variable writes its items, so @(...).Count counts them.
@@ -73,11 +89,6 @@ function Get-ActiveUrl {
 
 function Get-TabUrls { return @(Invoke-Extension "chrome.tabs.query({})" | ForEach-Object { $_.url }) }
 
-function Stop-TestChrome {
-    Get-CimInstance Win32_Process -Filter "Name = 'chrome.exe'" |
-        Where-Object { $_.CommandLine -like "*$TestProfile*" } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-}
 
 function Wait-Until([scriptblock]$Condition, [int]$TimeoutMs = 10000, [string]$What = "condition") {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()

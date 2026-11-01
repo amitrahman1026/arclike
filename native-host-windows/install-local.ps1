@@ -9,6 +9,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# powershell -File passes "Chrome,Edge" as one string.
+$Browsers = $Browsers | ForEach-Object { $_ -split "," } | Where-Object { $_ }
 $HostName = "com.amitrahman1026.arclike"
 $ExtensionId = "jlmidbafifiahhcpahkcejphlibhjapo"
 $RegistryKeys = @{
