@@ -70,6 +70,11 @@ namespace Arclike.Services
             JsonObject Fail(string code, string detail)
             {
                 _log($"Arc import: {code}: {detail}");
+                // A failure carries no data. A too_large reply that kept the sidebar would itself
+                // pass Chrome's 1 MB limit, and Chrome would close the connection instead of showing it.
+                response.Remove("sidebar");
+                response.Remove("extensions");
+                response.Remove("rankingPicks");
                 response["ok"] = false;
                 response["error"] = code;
                 response["detail"] = detail;

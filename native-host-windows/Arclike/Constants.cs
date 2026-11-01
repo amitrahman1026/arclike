@@ -18,6 +18,10 @@ namespace Arclike
         // copy started from SSH (session 0) cannot take the hook from the logged-on user.
         public const string EventTapMutexName = "Local\\" + AppId + ".hook";
         public static readonly string IpcPipeName = $"{AppId}.ipc.{Process.GetCurrentProcess().SessionId}";
+        // One setup window per desktop session. A second launch from the Start menu sets the event,
+        // and the first copy shows its window.
+        public const string SetupMutexName = "Local\\" + AppId + ".setup";
+        public const string ShowSetupEventName = "Local\\" + AppId + ".showSetup";
 
         // Paths
         public static readonly string AppDataDir = Path.Combine(

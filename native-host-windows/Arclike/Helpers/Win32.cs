@@ -97,6 +97,11 @@ namespace Arclike.Helpers
         [DllImport("user32.dll")]
         public static extern bool SetForegroundWindow(IntPtr hWnd);
 
+        /// <summary>Lets another process take the foreground, which this one may give.</summary>
+        [DllImport("user32.dll")]
+        public static extern bool AllowSetForegroundWindow(int dwProcessId);
+        public const int ASFW_ANY = -1;
+
         [DllImport("user32.dll")]
         public static extern bool BringWindowToTop(IntPtr hWnd);
 

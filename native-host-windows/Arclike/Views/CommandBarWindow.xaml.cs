@@ -205,6 +205,10 @@ namespace Arclike.Views
 
         private void HideBar()
         {
+            // Esc and Enter close the bar while it is the foreground window. A click on another
+            // window or Alt+Tab closes it after the foreground has moved on, and the browser must
+            // not take it back from the window the user chose.
+            bool wasForeground = NativeMethods.GetForegroundWindow() == new WindowInteropHelper(this).Handle;
             _isVisible = false;
             Hide();
             _items = new List<CommandBarItem>();
@@ -212,7 +216,7 @@ namespace Arclike.Views
             RenderRows();
             // Windows would activate whatever window is next in z-order, which may not be the
             // browser. The bar had the last input, so it may hand the foreground back.
-            if (_browserWindow != IntPtr.Zero && Win32.IsWindow(_browserWindow))
+            if (wasForeground && _browserWindow != IntPtr.Zero && Win32.IsWindow(_browserWindow))
                 Win32.SetForegroundWindow(_browserWindow);
         }
 

@@ -125,7 +125,31 @@ namespace Arclike.Services
                 }
             }
 
+            // The installer registers the host for every browser it knows and writes no config.
+            // A browser whose key names an existing manifest is registered, so the setup window
+            // shows it as enabled, and enabling another browser there does not remove its key.
+            foreach (var browser in baseBrowsers)
+            {
+                if (!browser.IsEnabled && IsRegistered(browser.RegistryKey))
+                    browser.IsEnabled = true;
+            }
+
             Browsers = baseBrowsers;
+        }
+
+        /// <summary>Whether HKCU has the host under `registryKey`, naming a manifest that exists.</summary>
+        private static bool IsRegistered(string registryKey)
+        {
+            if (!OperatingSystem.IsWindows() || string.IsNullOrEmpty(registryKey)) return false;
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey($@"{registryKey}\{Constants.NativeMessagingHostName}");
+                return key?.GetValue(null) is string path && File.Exists(path);
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private List<BrowserInfo> BaseBrowserList()

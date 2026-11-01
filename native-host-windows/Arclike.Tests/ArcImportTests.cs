@@ -50,6 +50,25 @@ public class ArcImportTests : IDisposable
     }
 
     [Fact]
+    public void TooLargeSidebarFailsWithoutTheSidebarInTheReply()
+    {
+        // 700 tabs with 2,000-character titles: about 1.5 MB after trimming.
+        var title = new string('x', 2000);
+        var items = string.Join(",", Enumerable.Range(0, 700).Select(i =>
+            new JsonObject
+            {
+                ["id"] = "t" + i, ["title"] = title, ["childrenIds"] = new JsonArray(),
+                ["data"] = new JsonObject { ["tab"] = new JsonObject { ["savedURL"] = "https://example.com/" + i } }
+            }.ToJsonString()));
+        Write("Arc/StorableSidebar.json",
+            "{\"version\": 1, \"sidebar\": {\"containers\": [{\"spaces\": [], \"items\": [" + items + "]}]}}");
+        var response = Import().Response(null, "0.1.0", "10");
+        Assert.Equal("too_large", response["error"]!.GetValue<string>());
+        Assert.Null(response["sidebar"]);
+        Assert.True(System.Text.Encoding.UTF8.GetByteCount(response.ToJsonString()) < 10_000);
+    }
+
+    [Fact]
     public void BadJsonFailsWithBadFormat()
     {
         Write("Arc/StorableSidebar.json", "{ not json");

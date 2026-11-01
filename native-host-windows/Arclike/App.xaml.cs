@@ -26,6 +26,8 @@ namespace Arclike
         private CommandBarWindow? _commandBar;
         private ToastOverlay? _toastOverlay;
         private SetupWindow? _setupWindow;
+        private Mutex? _setupMutex;
+        private EventWaitHandle? _showSetupEvent;
 
         /// <summary>Set once our extension has registered.</summary>
         private volatile bool _extensionRegistered;
@@ -51,6 +53,15 @@ namespace Arclike
 
             LaunchedDirectly = DetectLaunchMode(e.Args);
             DebugLogger.Log($"Launched directly: {LaunchedDirectly}");
+
+            // A copy opened from the Start menu only shows the setup window. When one is open
+            // already, bring it forward and leave, as a second launch on macOS does.
+            if (LaunchedDirectly && !TakeSetupInstance())
+            {
+                DebugLogger.Log("Setup is open in another copy - showing it there and exiting");
+                Shutdown();
+                return;
+            }
 
             BrowserConfigManager.Instance.LoadConfig();
             BrowserConfigManager.Instance.LoadShortcuts();
@@ -128,6 +139,30 @@ namespace Arclike
             {
                 DebugLogger.Log("WARNING: Could not auto-detect browser, will wait for registration");
             }
+        }
+
+        /// <summary>
+        /// Become the one copy that shows the setup window, or ask the copy that is to show it.
+        /// Returns whether this copy is it.
+        /// </summary>
+        private bool TakeSetupInstance()
+        {
+            _setupMutex = new Mutex(true, Constants.SetupMutexName, out bool first);
+            _showSetupEvent = new EventWaitHandle(false, EventResetMode.AutoReset, Constants.ShowSetupEventName);
+            if (!first)
+            {
+                // This copy was just started by the user, so it may pass the foreground on.
+                Win32.AllowSetForegroundWindow(Win32.ASFW_ANY);
+                _showSetupEvent.Set();
+                return false;
+            }
+            var listener = new Thread(() =>
+            {
+                while (_showSetupEvent.WaitOne())
+                    Dispatcher.BeginInvoke(ShowSetupWindow);
+            }) { IsBackground = true, Name = "ShowSetup" };
+            listener.Start();
+            return true;
         }
 
         // ---- Leadership ----
@@ -379,7 +414,14 @@ namespace Arclike
             if (_setupWindow == null)
             {
                 _setupWindow = new SetupWindow();
-                _setupWindow.Closed += (s, e) => _setupWindow = null;
+                _setupWindow.Closed += (s, e) =>
+                {
+                    _setupWindow = null;
+                    // A copy opened only for setup has no browser to serve. Without this it stays,
+                    // hidden, and may hold the keyboard hook. The browser's own copy takes over.
+                    if (LaunchedDirectly)
+                        Shutdown();
+                };
             }
             _setupWindow.Show();
             _setupWindow.Activate();
@@ -392,6 +434,10 @@ namespace Arclike
             _leaderElection?.Release();
             _ipc?.Stop();
             _nativeMessaging?.Stop();
+            if (_setupMutex != null)
+            {
+                try { _setupMutex.ReleaseMutex(); } catch { }
+            }
             base.OnExit(e);
         }
     }
