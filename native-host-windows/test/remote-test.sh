@@ -3,6 +3,7 @@
 #   native-host-windows/test/remote-test.sh            protocol test and every scenario
 #   native-host-windows/test/remote-test.sh smoke ...  named scenarios from test/scenarios
 #   native-host-windows/test/remote-test.sh setup      one-time: probe, puppeteer-core, the task
+#   native-host-windows/test/remote-test.sh installer  build the installer into native-host-windows/dist
 # Needs an SSH host entry (default name arclike-win, or set ARCLIKE_WIN_HOST) and a one-time run
 # of the setup mode. See docs/windows-port.md, sections 7 and 8.
 set -euo pipefail
@@ -24,6 +25,14 @@ git -C "$ROOT" archive --format=tar -o "$TAR" "$(GIT_INDEX_FILE="$INDEX" git -C 
 ssh "$HOST" "$PS -Command \"New-Item -ItemType Directory -Force C:\\arclike | Out-Null; Remove-Item -Recurse -Force C:\\arclike\\src -ErrorAction SilentlyContinue; New-Item -ItemType Directory -Force C:\\arclike\\src | Out-Null\""
 scp -q "$TAR" "$HOST:C:/arclike/src.tar"
 ssh "$HOST" "tar -x -f C:/arclike/src.tar -C C:/arclike/src"
+
+if [ "${SCENARIOS[0]}" = installer ]; then
+    ssh "$HOST" "$PS -File C:\\arclike\\src\\native-host-windows\\build.ps1 -Installer"
+    mkdir -p "$ROOT/native-host-windows/dist"
+    scp -q "$HOST:C:/arclike/src/native-host-windows/dist/Arclike-*-Setup.exe" "$ROOT/native-host-windows/dist/"
+    ls -l "$ROOT"/native-host-windows/dist/Arclike-*-Setup.exe
+    exit
+fi
 
 if [ "${SCENARIOS[0]}" = setup ]; then
     ssh "$HOST" "$PS -File C:\\arclike\\src\\native-host-windows\\test\\Register-InteractiveRunner.ps1"

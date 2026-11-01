@@ -86,7 +86,9 @@ namespace Arclike.NativeMessaging
                     _stdout.Flush();
                 }
 
-                DebugLogger.Log($"Sent message: {json.Substring(0, Math.Min(json.Length, 200))}");
+                // The action only, as in main.swift. The rest can hold what was typed in the
+                // command bar, or a URL.
+                DebugLogger.Log($"Sent message: {JsonNode.Parse(json)?["action"]}");
             }
             catch (Exception ex)
             {

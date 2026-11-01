@@ -72,9 +72,10 @@ if ($Installer) {
         exit 1
     }
 
-    # Check for InnoSetup
-    $Iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-    if (-not (Test-Path $Iscc)) {
+    # Inno Setup: a machine install, a per-user install (winget without elevation), or PATH.
+    $Iscc = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $Iscc) {
         $Iscc = Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
     }
 
