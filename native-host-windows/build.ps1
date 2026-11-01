@@ -79,7 +79,9 @@ if ($Installer) {
     }
 
     if ($Iscc -and (Test-Path $Iscc)) {
-        & $Iscc $IssFile
+        # One version for the app and the installer: the one in Arclike.csproj.
+        $Version = ([xml](Get-Content "$ProjectDir\Arclike\Arclike.csproj")).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+        & $Iscc "/DMyAppVersion=$Version" $IssFile
         if ($LASTEXITCODE -eq 0) {
             Write-Host "Installer created in dist\" -ForegroundColor Green
         } else {

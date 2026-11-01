@@ -6,7 +6,7 @@ namespace Arclike
 {
     public static class Constants
     {
-        public const string AppVersion = "0.1.0";
+        public const string AppVersion = "0.2.0";
         public const string AppName = "Arclike";
         public const string AppId = "com.amitrahman1026.arclike";
         public const string NativeMessagingHostName = AppId;
