@@ -185,6 +185,23 @@ test('a search is not completed', async () => {
   assert.strictEqual(h.lastSent('command_bar_results').autocomplete, '');
 });
 
+test('a space after the words leads with the search row, even over an open tab, and is not completed', async () => {
+  const h = browser();
+  await h.call(`commandBarOpen("new_tab")`);
+  assert.strictEqual((await query(h, 'netflix'))[0].kind, 'tab');
+  assert.deepStrictEqual(kinds(await query(h, 'netflix ')).slice(0, 2), ['search:netflix', 'tab:https://www.netflix.com/browse']);
+  assert.strictEqual(h.lastSent('command_bar_results').autocomplete, '');
+  assert.strictEqual((await query(h, 'settings '))[0].kind, 'search');
+});
+
+test('a search chosen after a space does not make the words alone search next time', async () => {
+  const h = browser();
+  await h.call(`commandBarOpen("new_tab")`);
+  await choose(h, 'netflix ', { kind: 'search', title: 'netflix', text: 'netflix' });
+  assert.strictEqual((await query(h, 'netflix'))[0].kind, 'tab');
+  assert.strictEqual(h.local.commandBarMemory, undefined);
+});
+
 test('rows are sent before their favicons, which follow', async () => {
   const h = browser();
   await h.call(`commandBarOpen("new_tab")`);

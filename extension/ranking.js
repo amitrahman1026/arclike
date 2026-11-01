@@ -141,10 +141,12 @@ var rankImport = function(entries, dryRun) {
 };
 
 // Remember that `item` was chosen for the typed `text`. Commands and typed addresses are not
-// remembered: they are found the same way every time.
+// remembered: they are found the same way every time. Nor is text that ends in a space: the space
+// chose the search, so a search for "youtube " must not make "youtube" search next time.
 var rankRemember = function(text, item, now) {
+	var spaced = /\s$/.test(text || "");
 	text = (text || "").trim().toLowerCase();
-	if (!text || !item || commandBarTypedUrl(text)) {
+	if (!text || !item || spaced || commandBarTypedUrl(text)) {
 		return;
 	}
 	var entry = { text: text, at: now || Date.now(), count: 1 };

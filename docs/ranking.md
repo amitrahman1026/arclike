@@ -51,6 +51,8 @@ Recency has a small weight because Arc's data showed that how often you visit a 
 
 The bar checks these in order. The first that applies chooses the first row. A page never leads for a query of one letter.
 
+When the query ends in a space, the search row leads, as in Arc. For example, `youtube` gives your YouTube tab, and `youtube ` searches for youtube. The field does not complete a query that ends in a space.
+
 1. The query is an address, such as `github.com/me`. The first row opens it, or switches to a tab that has it open.
 2. The best page leads when all of these are true:
    - Its score is 0.5 or more.
@@ -66,7 +68,7 @@ After the first row come the search row, one past search, up to 2 commands, and 
 
 ## Memory
 
-When you choose a row, the bar stores what you typed, what you chose, when, and how many times. It keeps the newest 2000 choices in `chrome.storage.local`. It does not store commands or typed addresses, because the bar finds those the same way every time.
+When you choose a row, the bar stores what you typed, what you chose, when, and how many times. It keeps the newest 2000 choices in `chrome.storage.local`. It does not store commands or typed addresses, because the bar finds those the same way every time. It also does not store a choice for a query that ends in a space, because the space chose the search.
 
 A stored choice applies when the text you typed then starts with the query. Its strength is:
 

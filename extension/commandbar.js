@@ -218,7 +218,7 @@ var commandBarSiteRow = function(url) {
 // when the first row is that site, so Enter goes where the field says.
 var commandBarAutocomplete = function(query, lead) {
 	var text = query.trim();
-	if (!lead || !lead.url || ["url", "tab", "closed"].indexOf(lead.kind) === -1 || /[\s\/]/.test(text)) {
+	if (/\s$/.test(query) || !lead || !lead.url || ["url", "tab", "closed"].indexOf(lead.kind) === -1 || /[\s\/]/.test(text)) {
 		return "";
 	}
 	var host = commandBarHost(lead.url);
@@ -416,6 +416,9 @@ var COMMAND_BAR_PAST_SEARCHES = 1;
 
 var commandBarRank = function(query, sources) {
 	var text = query.trim();
+	// A space after the words says you mean a search, as in Arc: "youtube " searches for youtube
+	// even with a YouTube tab open.
+	var searching = /\s$/.test(query);
 	var context = sources.context || {};
 	var recalled = context.recalled || { pages: new Map(), searches: [], searchHere: 0 };
 	context = Object.assign({}, context, { remembered: new Map(Array.from(recalled.pages, function(entry) {
@@ -501,11 +504,12 @@ var commandBarRank = function(query, sources) {
 		// chosen more strongly before. A tab closed a moment ago leads when its site or title starts
 		// with the query.
 		var named = best && (best.features.host || best.features.title || best.features.remembered);
-		var strong = best && text.length >= 2 && recalled.searchHere <= best.features.remembered &&
+		var strong = best && !searching && text.length >= 2 && recalled.searchHere <= best.features.remembered &&
 			((named && best.score >= RANK_LEAD) ||
 				(commandBarFreshlyClosed(best) && Math.max(best.features.host, best.features.title) >= 1));
 		// A command whose name starts with the query leads when no page does: "set" is Settings.
-		if (!strong && commands.length && commands[0].match >= COMMAND_BAR_STRONG_COMMAND_MATCH && text.length >= 3) {
+		if (!strong && !searching && commands.length && commands[0].match >= COMMAND_BAR_STRONG_COMMAND_MATCH &&
+			text.length >= 3) {
 			results.push(commands.shift());
 		}
 		if (strong) {
