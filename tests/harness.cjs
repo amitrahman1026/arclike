@@ -79,7 +79,7 @@ function load(opts = {}) {
       update: async (id, props) => { windowsFocused.push({ id, props }); return state.windows.find(w => w.id === id); },
       create: record('windows.create', {}),
     },
-    history: { search: async () => opts.history || [], onVisited: makeEvent(), onVisitRemoved: makeEvent() },
+    history: { search: async () => opts.history || [], deleteUrl: record('history.deleteUrl'), onVisited: makeEvent(), onVisitRemoved: makeEvent() },
     bookmarks: { search: async () => opts.bookmarks || [] },
     topSites: { get: async () => opts.topSites || [] },
     search: { query: async (q) => { searched.push(q); } },

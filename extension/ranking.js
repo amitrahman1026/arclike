@@ -161,6 +161,18 @@ var rankRemember = function(text, item, now) {
 	rankRememberAll([entry]);
 };
 
+// Forget the searches for `text`, removed from the command bar with Shift+Delete.
+var rankForgetSearch = function(text) {
+	var q = (text || "").trim().toLowerCase();
+	var before = rankMemory.length;
+	rankMemory = rankMemory.filter(function(entry) {
+		return !entry.search || entry.search.trim().toLowerCase() !== q;
+	});
+	if (rankMemory.length !== before) {
+		rankSaveMemory();
+	}
+};
+
 // Forget what history deletion removed, so a page deleted from Chrome's history is not offered
 // again from here. `removed` is chrome.history.onVisitRemoved's argument: with allHistory, every
 // choice goes, searches too, since Chrome's history holds each search's results page.

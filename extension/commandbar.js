@@ -526,17 +526,19 @@ var commandBarRank = function(query, sources) {
 		}
 		if (strong) {
 			// A site name leads with the site itself, unless a tab, open or just closed, has a page
-			// of it, or this very page was chosen for the text before.
+			// of it, or this very page was chosen for the text before. Removing a site row found in
+			// history removes the page it came from too.
 			var site = best.kind !== "tab" && best.kind !== "closed" && !best.features.remembered &&
 				commandBarHost(best.url).indexOf(text.toLowerCase()) === 0 ?
-				commandBarSiteRow(best.url) : best;
+				Object.assign(commandBarSiteRow(best.url), best.kind === "history" ?
+					{ removable: true, source: best.url } : {}) : best;
 			results.push(site);
 			var siteKey = commandBarUrlKey(site.url);
 			candidates = candidates.filter(function(c) { return c === site || c.key !== siteKey; });
 		}
 		results.push(commandBarSearchRow(text));
 		recalled.searches.slice(0, COMMAND_BAR_PAST_SEARCHES).forEach(function(search) {
-			results.push(commandBarSearchRow(search.text));
+			results.push(Object.assign(commandBarSearchRow(search.text), { removable: true }));
 		});
 	}
 	// Other commands come right after the typed text's own rows, at most two of them.
@@ -550,7 +552,11 @@ var commandBarRank = function(query, sources) {
 	}
 	return results.slice(0, COMMAND_BAR_MAX_RESULTS).map(function(result) {
 		var row = { kind: result.kind, title: result.title, detail: result.detail, hint: result.hint };
-		["url", "tabId", "text", "command", "symbol", "pick", "sessionId"].forEach(function(field) {
+		// Shift+Delete removes a page found only in history, and a past search, as in Chrome.
+		if (result.kind === "history") {
+			row.removable = true;
+		}
+		["url", "tabId", "text", "command", "symbol", "pick", "sessionId", "removable", "source"].forEach(function(field) {
 			if (result[field] !== undefined) {
 				row[field] = result[field];
 			}
@@ -622,11 +628,16 @@ chrome.history.onVisited.addListener(function(item) {
 	}
 });
 
-// Deleted history must not be suggested, so read it again, and drop the choices made for it.
+// Deleted history must not be suggested, so drop it, and the choices made for it. Clearing all
+// of it reads the history again.
 chrome.history.onVisitRemoved.addListener(function(removed) {
-	commandBarHistory = null;
-	commandBarHistoryLoading = null;
-	commandBarLoadHistory();
+	if (removed && !removed.allHistory && commandBarHistory) {
+		(removed.urls || []).forEach(function(url) { commandBarHistory.delete(url); });
+	} else {
+		commandBarHistory = null;
+		commandBarHistoryLoading = null;
+		commandBarLoadHistory();
+	}
 	rankMemoryLoaded.then(function() {
 		rankForget(removed);
 	});
@@ -807,6 +818,33 @@ var commandBarQuery = async function(message) {
 	if (await commandBarAddFavicons(results) && message.seq === commandBarLatestSeq) {
 		sendToNativeHost(Object.assign({}, reply, { refresh: true }));
 	}
+};
+
+// Remove a row, as Shift+Delete does in Chrome's address bar: a page leaves the history and the
+// memory, and a past search leaves the memory. Then answer the query again, without that row.
+var commandBarRemove = async function(message) {
+	var item = message.item || {};
+	if (item.removable) {
+		await rankMemoryLoaded;
+		if (item.kind === "search") {
+			rankForgetSearch(item.text);
+		} else {
+			var urls = [item.url, item.source].filter(Boolean);
+			rankForget({ urls: urls });
+			urls.forEach(function(url) {
+				if (commandBarHistory) {
+					commandBarHistory.delete(url);
+				}
+			});
+			await Promise.all(urls.map(function(url) {
+				return chrome.history.deleteUrl({ url: url }).catch(function(e) {
+					log("CommandBar::Could not remove from history: " + e.message);
+				});
+			}));
+		}
+		commandBarTrace("removed a " + item.kind + " row");
+	}
+	await commandBarQuery({ query: message.query || "", seq: message.seq });
 };
 
 // Written to the app's debug log, which is easier to reach than the worker's console.

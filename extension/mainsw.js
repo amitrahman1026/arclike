@@ -685,6 +685,8 @@ var connectNativeHost = function() {
 				commandBarQuery(message);
 			} else if (message.action === "command_bar_choose") {
 				commandBarChoose(message);
+			} else if (message.action === "command_bar_remove") {
+				commandBarRemove(message);
 			} else if (message.action === "little_arc_to_main") {
 				littleArcToMainFromKey();
 			} else if (message.action === "command_bar_closed") {

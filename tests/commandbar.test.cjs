@@ -202,6 +202,54 @@ test('a search chosen after a space does not make the words alone search next ti
   assert.strictEqual(h.local.commandBarMemory, undefined);
 });
 
+// Remove `row` the way the app asks on Shift+Delete, and return the rows sent back.
+async function remove(h, text, row) {
+  await h.call(`commandBarRemove(${JSON.stringify({ item: row, query: text, seq: 8 })})`);
+  h.call('commandBarLatestSeq = 0');
+  const reply = h.lastSent('command_bar_results');
+  assert.strictEqual(reply.seq, 8, 'the reply answers the query again');
+  return reply.results;
+}
+
+test('a page from history can be removed: it leaves the history, the memory and the rows', async () => {
+  const h = browser({ history: [
+    { url: 'https://example.org/old', title: 'Old example page', visitCount: 3, lastVisitTime: Date.now() },
+  ] });
+  await h.call('commandBarOpen("new_tab")');
+  await choose(h, 'old example', { kind: 'history', title: 'Old example page', url: 'https://example.org/old' });
+  const rows = await query(h, 'old example');
+  const page = rows.find(r => r.url === 'https://example.org/old');
+  assert.strictEqual(page.removable, true);
+  assert.ok(!rows.some(r => r.kind === 'tab' && r.removable), 'open tabs are not removed');
+  assert.ok(!rows.some(r => r.kind === 'search' && r.text === 'old example' && r.removable), 'nor the search row');
+  const after = await remove(h, 'old example', page);
+  assert.ok(!after.some(r => r.url === 'https://example.org/old'));
+  assert.deepStrictEqual(plain(h.ran).filter(c => c[0] === 'history.deleteUrl'), [['history.deleteUrl', { url: 'https://example.org/old' }]]);
+  assert.deepStrictEqual(h.local.commandBarMemory, []);
+});
+
+test('removing a site row removes the site and the page it came from', async () => {
+  const h = browser({ history: [
+    { url: 'https://www.youtube.com/watch?v=1', title: 'A video', visitCount: 30, lastVisitTime: Date.now() },
+  ] });
+  await h.call('commandBarOpen("new_tab")');
+  const site = (await query(h, 'you'))[0];
+  assert.deepStrictEqual([site.url, site.removable], ['https://www.youtube.com/', true]);
+  await remove(h, 'you', site);
+  assert.deepStrictEqual(plain(h.ran).filter(c => c[0] === 'history.deleteUrl').map(c => c[1].url),
+    ['https://www.youtube.com/', 'https://www.youtube.com/watch?v=1']);
+});
+
+test('a past search can be removed from the memory', async () => {
+  const h = browser();
+  await h.call('commandBarOpen("new_tab")');
+  await choose(h, 'black vs', { kind: 'search', title: 'black vs green cardamom', text: 'black vs green cardamom' });
+  const past = (await query(h, 'black'))[1];
+  assert.deepStrictEqual([past.text, past.removable], ['black vs green cardamom', true]);
+  assert.deepStrictEqual(kinds(await remove(h, 'black', past)), ['search:black']);
+  assert.deepStrictEqual(h.local.commandBarMemory, []);
+});
+
 test('rows are sent before their favicons, which follow', async () => {
   const h = browser();
   await h.call(`commandBarOpen("new_tab")`);

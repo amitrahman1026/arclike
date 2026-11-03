@@ -7,7 +7,7 @@ import Sparkle
 import UserNotifications
 import ImageIO
 
-let APP_VERSION = "0.3.0"
+let APP_VERSION = "0.4.0"
 
 // MARK: - Branding
 
@@ -1906,6 +1906,8 @@ struct CommandBarItem: Identifiable {
     /// field as typed.
     let fill: String
     let favicon: NSImage?
+    /// A page from history or a past search, which Shift+Delete removes.
+    let removable: Bool
     let payload: [String: Any]
 }
 
@@ -1930,6 +1932,7 @@ func parseCommandBarItems(_ results: [[String: Any]]) -> [CommandBarItem] {
             symbol: dict["symbol"] as? String ?? "",
             fill: fill,
             favicon: favicon,
+            removable: dict["removable"] as? Bool ?? false,
             payload: dict
         ))
     }
@@ -1983,6 +1986,8 @@ final class CommandBarState: NSObject, ObservableObject, NSTextFieldDelegate, NS
     /// deleting a completion does not bring it straight back.
     private var completing = false
     private var querySeq = 0
+    /// The row to select when the rows come back after one was removed.
+    private var keepSelection: Int?
     private var panel: CommandBarPanel?
     /// Hover is ignored until the cursor moves, so a row that appears under a resting cursor is
     /// not selected by accident.
@@ -2055,7 +2060,12 @@ final class CommandBarState: NSObject, ObservableObject, NSTextFieldDelegate, NS
         self.items = items
         self.tip = tip
         itemsQuery = typed
-        selectedIndex = typed.trimmingCharacters(in: .whitespaces).isEmpty || items.isEmpty ? nil : 0
+        if let keep = keepSelection {
+            selectedIndex = items.isEmpty ? nil : min(keep, items.count - 1)
+            keepSelection = nil
+        } else {
+            selectedIndex = typed.trimmingCharacters(in: .whitespaces).isEmpty || items.isEmpty ? nil : 0
+        }
         if completing {
             showCompletion(autocomplete)
         }
@@ -2088,6 +2098,21 @@ final class CommandBarState: NSObject, ObservableObject, NSTextFieldDelegate, NS
         // Hide first, so the browser window has the keyboard back before the tab opens.
         hidePanel()
         sendMessage(message)
+    }
+
+    /// Remove a row from the history or the memory, as Shift+Delete does in Chrome's address
+    /// bar. The extension answers the query again without it, and the selection stays in place.
+    func remove(index: Int) {
+        guard isVisible, items.indices.contains(index), items[index].removable else { return }
+        let item = items[index]
+        querySeq += 1
+        keepSelection = index
+        completing = false
+        if let field = panel?.field, field.stringValue != typed {
+            field.stringValue = typed
+            field.currentEditor()?.selectedRange = NSRange(location: (typed as NSString).length, length: 0)
+        }
+        sendMessage(["action": "command_bar_remove", "item": item.payload, "query": typed, "seq": querySeq])
     }
 
     /// Retire the tip on show. The bar stays open.
@@ -2140,6 +2165,7 @@ final class CommandBarState: NSObject, ObservableObject, NSTextFieldDelegate, NS
     }
 
     private func sendQuery() {
+        keepSelection = nil
         querySeq += 1
         sendMessage(["action": "command_bar_query", "query": typed, "seq": querySeq])
     }
@@ -2183,6 +2209,12 @@ final class CommandBarState: NSObject, ObservableObject, NSTextFieldDelegate, NS
             choose(index: selectedIndex)
         case #selector(NSResponder.cancelOperation(_:)):
             dismiss()
+        case #selector(NSResponder.deleteForward(_:)):
+            // Shift+Fn+Delete removes the selected row, as in Chrome. Shift+Delete alone is left
+            // to edit the text: it is easy to press while typing a capital.
+            guard NSApp.currentEvent?.modifierFlags.contains(.shift) == true,
+                  let index = selectedIndex, items.indices.contains(index), items[index].removable else { return false }
+            remove(index: index)
         default:
             return false
         }
@@ -2241,6 +2273,7 @@ struct CommandBarRow: View {
     let item: CommandBarItem
     let query: String
     let isSelected: Bool
+    var onRemove: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 12) {
@@ -2271,6 +2304,16 @@ struct CommandBarRow: View {
                             .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.18)))
                     }
                 }
+            }
+            if isSelected && item.removable {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.85))
+                    .frame(width: 22, height: 22)
+                    .background(RoundedRectangle(cornerRadius: 5).fill(Color.white.opacity(0.18)))
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onRemove)
+                    .help("Remove this suggestion (Shift+Fn+Delete)")
             }
         }
         .padding(.horizontal, 12)
@@ -2365,7 +2408,8 @@ struct CommandBarView: View {
                     .padding(.horizontal, 12)
                 VStack(spacing: CommandBarLayout.rowSpacing) {
                     ForEach(state.items) { item in
-                        CommandBarRow(item: item, query: state.itemsQuery, isSelected: state.selectedIndex == item.id)
+                        CommandBarRow(item: item, query: state.itemsQuery, isSelected: state.selectedIndex == item.id,
+                                      onRemove: { state.remove(index: item.id) })
                             .contentShape(Rectangle())
                             .background(HoverTrackingView { state.hoverSelect(index: item.id) })
                             .onTapGesture { state.choose(index: item.id) }
