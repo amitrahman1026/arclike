@@ -92,6 +92,24 @@ test('current-window-only scoping excludes other windows', async () => {
   assert.strictEqual(h2.lastSent('show_switcher').tabs.length, 4, 'all windows when asked');
 });
 
+test('all windows means the windows of the same kind: normal or incognito', async () => {
+  const windows = () => [
+    win(1, [tab(10, { active: true, lastAccessed: fresh(1) })], true),
+    win(2, [tab(20, { active: true, lastAccessed: fresh(2) })]),
+    Object.assign(win(3, [tab(30, { active: true, incognito: true, lastAccessed: fresh(3) })]), { incognito: true }),
+  ];
+  const h = load({ windows: windows() });
+  await h.deliver({ action: 'cycle_next', current_window_only: false });
+  assert.deepStrictEqual(h.lastSent('show_switcher').tabs.map(t => t.id).sort(), [10, 20]);
+
+  const incognito = windows();
+  incognito[0].focused = false;
+  incognito[2].focused = true;
+  const h2 = load({ windows: incognito });
+  await h2.deliver({ action: 'cycle_next', current_window_only: false });
+  assert.deepStrictEqual(h2.lastSent('show_switcher').tabs.map(t => t.id), [30]);
+});
+
 test('a tab missing from the MRU is still offered', async () => {
   const h = load({ windows: fourFresh() });
   h.set('mru', [10, 11]);                                  // 12 and 13 never got a create event

@@ -777,7 +777,10 @@ var buildSwitcherTabs = function(windows, focusedWindow) {
 		});
 	});
 
-	var scope = currentWindowOnly ? [focusedWindow] : windows;
+	// Incognito and normal windows never share a switcher, as in the command bar.
+	var scope = currentWindowOnly ? [focusedWindow] : windows.filter(function(win) {
+		return Boolean(win.incognito) === Boolean(focusedWindow.incognito);
+	});
 	var tabsById = new Map();
 	scope.forEach(function(win) {
 		win.tabs.forEach(function(tab) {
