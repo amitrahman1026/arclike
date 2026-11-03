@@ -34,6 +34,20 @@ public class CommandBarItemTests
     }
 
     [Fact]
+    public void ParseReadsWhetherARowCanBeRemoved()
+    {
+        var results = JsonNode.Parse("""
+            [{"kind": "history", "title": "a", "removable": true}, {"kind": "tab", "title": "b"}]
+            """)!.AsArray();
+
+        var items = CommandBarItem.Parse(results);
+
+        Assert.True(items[0].Removable);
+        Assert.True(items[0].Payload["removable"]!.GetValue<bool>());
+        Assert.False(items[1].Removable);
+    }
+
+    [Fact]
     public void ParseLeavesTheSourceUntouched()
     {
         var results = JsonNode.Parse("""[{"kind": "url", "title": "x", "fill": "x"}]""")!.AsArray();

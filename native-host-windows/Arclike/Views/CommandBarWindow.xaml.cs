@@ -51,6 +51,8 @@ namespace Arclike.Views
         private bool _completing;
         private bool _settingText;
         private int _querySeq;
+        /// <summary>The row to select when the rows come back after one was removed.</summary>
+        private int? _keepSelection;
         private IntPtr _browserWindow;
         private Win32.POINT _cursorAtShow;
 
@@ -157,7 +159,15 @@ namespace Arclike.Views
             _items = items;
             _tip = tip;
             _itemsQuery = _typed;
-            _selectedIndex = string.IsNullOrWhiteSpace(_typed) || items.Count == 0 ? null : 0;
+            if (_keepSelection is int keep)
+            {
+                _selectedIndex = items.Count == 0 ? null : Math.Min(keep, items.Count - 1);
+                _keepSelection = null;
+            }
+            else
+            {
+                _selectedIndex = string.IsNullOrWhiteSpace(_typed) || items.Count == 0 ? null : 0;
+            }
             if (_completing)
                 ShowCompletion(autocomplete);
             RenderRows();
@@ -193,6 +203,25 @@ namespace Arclike.Views
             // Hide first, so the browser window has the keyboard back before the tab opens.
             HideBar();
             Send?.Invoke(message);
+        }
+
+        /// <summary>
+        /// Remove a row from the history or the memory, as Shift+Delete does in Chrome's address
+        /// bar. The extension answers the query again without it, and the selection stays in place.
+        /// </summary>
+        private void Remove(int index)
+        {
+            if (!_isVisible || index < 0 || index >= _items.Count || !_items[index].Removable) return;
+            var item = _items[index];
+            _querySeq++;
+            _keepSelection = index;
+            _completing = false;
+            if (Field.Text != _typed) SetFieldText(_typed);
+            Send?.Invoke(new JsonObject
+            {
+                ["action"] = "command_bar_remove", ["item"] = item.Payload.DeepClone(),
+                ["query"] = _typed, ["seq"] = _querySeq
+            });
         }
 
         private void DismissTip()
@@ -298,6 +327,10 @@ namespace Arclike.Views
                 case Key.Escape:
                     Dismiss();
                     break;
+                // Shift+Delete removes the selected row, as in Chrome. Elsewhere it cuts text.
+                case Key.Delete when shift && _selectedIndex is int selected && selected < _items.Count && _items[selected].Removable:
+                    Remove(selected);
+                    break;
                 default:
                     return;
             }
@@ -335,6 +368,7 @@ namespace Arclike.Views
 
         private void SendQuery()
         {
+            _keepSelection = null;
             _querySeq++;
             Send?.Invoke(new { action = "command_bar_query", query = _typed, seq = _querySeq });
         }
@@ -391,6 +425,7 @@ namespace Arclike.Views
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
 
             // Icon: the favicon, or a glyph for the row's symbol.
             var iconBox = new Border
@@ -440,10 +475,31 @@ namespace Arclike.Views
                 grid.Children.Add(hint);
             }
 
+            int index = item.Index;
+            if (item.Removable)
+            {
+                // Shown on the selected row. A click removes the row instead of opening it.
+                var remove = new Border
+                {
+                    Width = 22, Height = 22, CornerRadius = new CornerRadius(5), Margin = new Thickness(8, 0, 0, 0),
+                    Background = new SolidColorBrush(Color.FromArgb(0x2E, 0xFF, 0xFF, 0xFF)),
+                    Visibility = Visibility.Collapsed, Tag = "remove", ToolTip = "Remove this suggestion (Shift+Delete)",
+                    Child = new TextBlock
+                    {
+                        Text = CommandBarItem.Glyph("xmark", ""), FontFamily = IconFont, FontSize = 10,
+                        Foreground = new SolidColorBrush(Color.FromArgb(0xD9, 0xFF, 0xFF, 0xFF)),
+                        HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+                    }
+                };
+                System.Windows.Automation.AutomationProperties.SetAutomationId(remove, "CommandBarRowRemove");
+                remove.MouseLeftButtonUp += (s, e) => { e.Handled = true; Remove(index); };
+                Grid.SetColumn(remove, 3);
+                grid.Children.Add(remove);
+            }
+
             var row = new AutomationBorder { CornerRadius = new CornerRadius(10), Child = grid, Background = Brushes.Transparent, Cursor = Cursors.Hand };
             System.Windows.Automation.AutomationProperties.SetAutomationId(row, "CommandBarRow");
             System.Windows.Automation.AutomationProperties.SetName(row, item.Title);
-            int index = item.Index;
             row.MouseMove += (s, e) => HoverSelect(index);
             row.MouseLeftButtonUp += (s, e) => Choose(index);
             return row;
@@ -472,6 +528,9 @@ namespace Arclike.Views
                             title.Foreground = new SolidColorBrush(Color.FromArgb(selected ? (byte)0xFF : (byte)0xD9, 0xFF, 0xFF, 0xFF));
                             foreach (var run in title.Inlines.OfType<Run>().Where(r => (r.Tag as string) == "detail"))
                                 run.Foreground = new SolidColorBrush(Color.FromArgb(selected ? (byte)0xCC : (byte)0x80, 0xFF, 0xFF, 0xFF));
+                            break;
+                        case Border { Tag: "remove" } remove:
+                            remove.Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
                             break;
                         case StackPanel hint:
                             foreach (var text in hint.Children.OfType<TextBlock>())

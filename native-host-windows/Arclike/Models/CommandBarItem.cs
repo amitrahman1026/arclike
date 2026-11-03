@@ -19,6 +19,8 @@ namespace Arclike.Models
         public string Fill { get; init; } = "";
         /// <summary>The favicon as a data URL, or empty.</summary>
         public string Favicon { get; init; } = "";
+        /// <summary>A page from history or a past search, which Shift+Delete removes.</summary>
+        public bool Removable { get; init; }
         /// <summary>The row as sent, without the display-only fields. Sent back when the row is chosen.</summary>
         public JsonObject Payload { get; init; } = new();
 
@@ -48,6 +50,7 @@ namespace Arclike.Models
                     Symbol = Str(dict, "symbol"),
                     Fill = fill,
                     Favicon = favicon,
+                    Removable = dict["removable"] is JsonValue removable && removable.TryGetValue<bool>(out var r) && r,
                     Payload = dict
                 });
             }

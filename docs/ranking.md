@@ -83,7 +83,7 @@ A stored search does not change the score of a page:
 - A search for the exact query keeps the search row first, unless a page was chosen more strongly.
 - A search for a longer text shows as a past-search row below the search row.
 
-To remove a page or a past search from the bar, select its row and press `Shift+Fn+Delete`, or click its **×**. A page leaves Chrome's history and the memory. A past search leaves the memory. Open tabs, closed tabs, bookmarks, and the search row for the query cannot be removed.
+To remove a page or a past search from the bar, select its row and press `Shift+Fn+Delete` on a Mac or `Shift+Delete` on Windows, or click its **×**. A page leaves Chrome's history and the memory. A past search leaves the memory. Open tabs, closed tabs, bookmarks, and the search row for the query cannot be removed.
 
 **Import from Arc** adds the choices from Arc's command bar to the memory, so the bar knows your Arc habits from the start. A second import adds only the new choices.
 
