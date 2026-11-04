@@ -27,6 +27,10 @@ var DEFAULT_MAX_SWITCHER_TABS = 5;
 var maxSwitcherTabs = DEFAULT_MAX_SWITCHER_TABS;
 var visitedTabs = {};        // tabId -> true once the tab has been on screen this session
 var visitedTabsLoaded = false;
+// Tabs Chrome creates this soon after it starts are the ones it restores, which wait to be
+// visited. A tab opened later, even in the background, joins the switcher at once.
+var RESTORED_TABS_MS = 15000;
+var browserStartedAt = 0;
 var activeTabByWindow = {};  // windowId -> tabId currently active in that window
 
 // Switch state
@@ -213,6 +217,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 
 chrome.runtime.onStartup.addListener(function () {
 	log("Extension startup");
+	browserStartedAt = Date.now();
 	initialize();
 });
 
@@ -357,6 +362,10 @@ chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
 chrome.tabs.onCreated.addListener(function(tab) {
 	log("Tab create event fired with tab("+tab.id+")");
 	addTabToMRUAfterCurrent(tab);
+	if (Date.now() - browserStartedAt > RESTORED_TABS_MS && !visitedTabs[tab.id]) {
+		visitedTabs[tab.id] = true;
+		saveVisitedTabs();
+	}
 });
 
 chrome.tabs.onRemoved.addListener(function(tabId, removedInfo) {
@@ -384,7 +393,7 @@ chrome.tabs.onRemoved.addListener(function(tabId, removedInfo) {
 // [1, 2, 3] a Cmd+click on tab 1 that opens tab 4 gives [1, 4, 2, 3]. The opener is
 // preferred; failing that, the active tab of the new tab's window, then the MRU head. If
 // the tab is opened in the foreground, onActivated then moves it to the front as usual. A tab
-// opened in the background joins the switcher only once it is visited.
+// opened in the background is then the next one Ctrl+Tab goes to.
 var addTabToMRUAfterCurrent = function(tab) {
 	if (mru.indexOf(tab.id) !== -1) {
 		return;

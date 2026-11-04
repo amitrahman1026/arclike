@@ -45,10 +45,21 @@ test('the visited list survives a service worker restart', async () => {
   assert.deepStrictEqual(h.lastSent('show_switcher').tabs.map(t => t.id), [10, 12, 13]);
 });
 
-test('a tab opened in the background joins only once visited', async () => {
-  const h = load({ windows: fourFresh(), visited: [] });
+test('a tab opened in the background is the next one the switcher offers', async () => {
+  const h = load({ windows: fourFresh(), visited: [12] });
   h.state.windows[0].tabs.push(tab(14));
   h.chrome.tabs.onCreated.emit({ id: 14, windowId: 1, openerTabId: 10 });
+  await h.deliver({ action: 'cycle_next', current_window_only: true });
+  const reply = h.lastSent('show_switcher');
+  assert.deepStrictEqual(reply.tabs.map(t => t.id), [10, 14, 12]);
+  assert.strictEqual(reply.selectedIndex, 1);
+});
+
+test('tabs Chrome restores as it starts join only once visited', async () => {
+  const h = load({ windows: fourFresh(), visited: [] });
+  h.chrome.runtime.onStartup.emit();
+  h.state.windows[0].tabs.push(tab(14));
+  h.chrome.tabs.onCreated.emit({ id: 14, windowId: 1 });
   await h.deliver({ action: 'cycle_next', current_window_only: true });
   assert.deepStrictEqual(h.lastSent('show_switcher').tabs.map(t => t.id), [10]);
 });
