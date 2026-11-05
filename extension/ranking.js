@@ -35,6 +35,11 @@ var RANK_RECENCY_HALF_LIFE_HOURS = 24;
 // The features of a page for `query`. `fuzzy` says the page matched only with typos. `context`
 // holds what the page alone does not say: `switched(tabId)` and `remembered` (url key ->
 // strength).
+// The frequency feature for a page visited `visits` times: on a log scale, 1 from 100 visits.
+var rankFrequency = function(visits) {
+	return Math.min(1, Math.log1p(visits || 0) / Math.log1p(100));
+};
+
 var rankFeatures = function(query, kind, item, title, url, fuzzy, context) {
 	var q = query.trim().toLowerCase();
 	var lowerTitle = (title || "").toLowerCase();
@@ -52,7 +57,7 @@ var rankFeatures = function(query, kind, item, title, url, fuzzy, context) {
 		title: titleIndex === 0 ? 1 : titleIndex > 0 ? 0.5 : 0,
 		coverage: Math.min(1, coverage),
 		exact: fuzzy ? 0 : 1,
-		frequency: Math.min(1, Math.log1p(item.visitCount || 0) / Math.log1p(100)),
+		frequency: rankFrequency(item.visitCount),
 		typed: Math.min(1, (item.typedCount || 0) / 5),
 		recency: item.lastVisitTime ? Math.pow(0.5, ageHours / RANK_RECENCY_HALF_LIFE_HOURS) : 0,
 		tab: kind === "tab" ? 1 : 0,

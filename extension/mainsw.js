@@ -27,10 +27,12 @@ var DEFAULT_MAX_SWITCHER_TABS = 5;
 var maxSwitcherTabs = DEFAULT_MAX_SWITCHER_TABS;
 var visitedTabs = {};        // tabId -> true once the tab has been on screen this session
 var visitedTabsLoaded = false;
-// Tabs Chrome creates this soon after it starts are the ones it restores, which wait to be
-// visited. A tab opened later, even in the background, joins the switcher at once.
+// Tabs created this soon after the worker starts are the ones Chrome restores as it starts, which
+// wait to be visited. A tab opened later, even in the background, joins the switcher at once.
+// The time counts from the worker's start, not from onStartup: Chrome can report the restored
+// tabs before onStartup, but never before the worker runs.
 var RESTORED_TABS_MS = 15000;
-var browserStartedAt = 0;
+var workerStartedAt = Date.now();
 var activeTabByWindow = {};  // windowId -> tabId currently active in that window
 
 // Switch state
@@ -217,7 +219,6 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
 
 chrome.runtime.onStartup.addListener(function () {
 	log("Extension startup");
-	browserStartedAt = Date.now();
 	initialize();
 });
 
@@ -362,7 +363,7 @@ chrome.tabs.onUpdated.addListener(function(tabId, changeInfo, tab) {
 chrome.tabs.onCreated.addListener(function(tab) {
 	log("Tab create event fired with tab("+tab.id+")");
 	addTabToMRUAfterCurrent(tab);
-	if (Date.now() - browserStartedAt > RESTORED_TABS_MS && !visitedTabs[tab.id]) {
+	if (Date.now() - workerStartedAt > RESTORED_TABS_MS && !visitedTabs[tab.id]) {
 		visitedTabs[tab.id] = true;
 		saveVisitedTabs();
 	}

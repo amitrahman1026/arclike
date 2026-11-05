@@ -68,7 +68,9 @@ test('an empty bar lists the tabs you were on lately, then the top sites, with t
     { url: 'https://www.netflix.com/browse', title: 'Home - Netflix' },
     { url: 'https://youtube.com/', title: 'YouTube' },
   ] });
-  h.set('mru', [10, 12, 11]);
+  h.set('mru', [10, 12, 11, 13]);
+  h.state.windows[0].tabs.push(tab(13, { url: 'https://restored.example/', title: 'Not looked at yet' }));
+  h.set('visitedTabs', { 10: true, 11: true, 12: true });
   await h.call(`commandBarOpen("new_tab")`);
   const results = await query(h, '');
   assert.deepStrictEqual(kinds(results), ['tab:https://leetcode.com/problemset/',
@@ -383,12 +385,14 @@ test('search suggestions follow the rows, in the places left', async () => {
   await h.call(`commandBarOpen("new_tab")`);
   await h.call(`commandBarQuery({ query: "netf", seq: 3 })`);
   const replies = h.sent.filter(m => m.action === 'command_bar_results').map(m => JSON.parse(JSON.stringify(m)));
-  assert.strictEqual(replies.length, 2);
+  assert.strictEqual(replies.length, 3, 'the rows, then a refresh for the favicons and one for the suggestions');
   assert.deepStrictEqual(kinds(replies[0].results), ['tab:https://www.netflix.com/browse', 'search:netf']);
-  assert.strictEqual(replies[1].refresh, true);
-  assert.deepStrictEqual(kinds(replies[1].results), ['tab:https://www.netflix.com/browse', 'search:netf',
+  const last = replies[2];
+  assert.strictEqual(last.refresh, true);
+  assert.deepStrictEqual(kinds(last.results), ['tab:https://www.netflix.com/browse', 'search:netf',
     'search:netflix', 'search:netflix stock', 'search:netflix shows']);
-  assert.strictEqual(replies[1].results[2].fill, 'netflix');
+  assert.strictEqual(last.results[0].favicon, 'data:image/png;base64,AQID', 'the later refresh keeps the favicons');
+  assert.strictEqual(last.results[2].fill, 'netflix');
   assert.strictEqual(h.fetched.length, 1);
   assert.match(h.fetched[0], /suggestqueries\.google\.com.*q=netf$/);
   // The same text again uses the suggestions it has, in the first answer.
@@ -396,6 +400,29 @@ test('search suggestions follow the rows, in the places left', async () => {
   const again = await query(h, 'netf');
   assert.strictEqual(again.length, 5);
   assert.strictEqual(h.fetched.length, 1);
+});
+
+test('favicons do not wait for suggestions, and a newer keystroke stops the older request', async () => {
+  const h = browser({ suggestions: 'hang' });
+  await h.call(`commandBarOpen("new_tab")`);
+  const first = h.call(`commandBarQuery({ query: "netf", seq: 3 })`);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  const replies = h.sent.filter(m => m.action === 'command_bar_results').map(m => JSON.parse(JSON.stringify(m)));
+  assert.strictEqual(replies.length, 2);
+  assert.strictEqual(replies[1].results[0].favicon, 'data:image/png;base64,AQID');
+  const second = h.call(`commandBarQuery({ query: "netfl", seq: 4 })`);
+  await first;
+  assert.strictEqual(h.fetched.length, 2);
+  assert.ok(!h.sent.some(m => m.action === 'log' && /no search suggestions for "netf"/.test(m.message)),
+    'a stopped request is not logged as a failure');
+  h.call('commandBarSuggestAbort.abort()');
+  await second;
+});
+
+test('a typo of a site you visited once still searches first', async () => {
+  const h = browser({ history: [{ url: 'https://react.dev/learn', title: 'Quick Start', visitCount: 1, lastVisitTime: Date.now() }] });
+  await h.call(`commandBarOpen("new_tab")`);
+  assert.deepStrictEqual(kinds(await query(h, 'reach')), ['search:reach', 'history:https://react.dev/learn']);
 });
 
 test('after a space the bar lists only searches, with more suggestions', async () => {

@@ -2,7 +2,7 @@
 
 The command bar shows up to 8 rows, and Enter opens the first row. The rows come from open tabs, recently closed tabs, bookmarks, the last 90 days of history, commands, and Google's search suggestions.
 
-An empty bar lists the tabs you were on most lately, newest first, as in Arc. Chrome's top sites fill the rest of the 6 rows.
+An empty bar lists the tabs you were on most lately, newest first, as in Arc. These are the tabs that Ctrl+Tab offers. Chrome's top sites fill the rest of the 6 rows.
 
 The ranking copies the design of Arc's command bar. Each page gets a few features, each a number from 0 to 1. A score combines them, and the best page goes first if it is good enough. Otherwise the search row goes first. The bar also remembers what you chose for what you typed.
 
@@ -61,7 +61,7 @@ When the query ends in a space, the bar lists only searches, as in Arc: the sear
    - The query starts its site's name or a word of its title, or you chose it for this text before.
    - You did not choose to search this exact text more strongly before.
 3. A tab that you closed in the last 10 minutes leads when the query starts its site's name or its title.
-4. The query is one word that is a site's name with a typo, and the bar found no good match without typos. The site leads, in a new tab. For example, `godbold` gives `godbolt.org/`. A typo of any other word leaves the search row first.
+4. The query is one word that is a site's name with a typo, and the bar found no good match without typos. The site leads, in a new tab, if you use it. A site you use is open in a tab, bookmarked, typed once, or visited 3 or more times. For example, `godbold` gives `godbolt.org/`. A typo of any other word leaves the search row first.
 5. A command whose name starts with the query leads when the query has 3 or more letters. For example, `set` gives Settings.
 6. Otherwise, the search row leads.
 

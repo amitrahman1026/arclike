@@ -108,7 +108,9 @@ function load(opts = {}) {
     chrome,
     console: { log: opts.verbose ? console.log : () => {} },
     // Google's search suggestions answer with opts.suggestions, as [query, [suggestions]].
-    fetch: async (url) => /suggestqueries/.test(url) ? (fetched.push(url), {
+    // With opts.suggestions 'hang', Google never answers, and the request ends only when stopped.
+    fetch: async (url, init) => /suggestqueries/.test(url) ? (fetched.push(url), opts.suggestions === 'hang' ?
+      new Promise((resolve, reject) => init.signal.addEventListener('abort', () => reject(new Error('aborted')))) : {
       json: async () => { if (opts.suggestions instanceof Error) throw opts.suggestions;
         return [decodeURIComponent(url.split('q=')[1]), opts.suggestions || []]; } }) :
       ({ json: async () => ({}), blob: async () => ({}),

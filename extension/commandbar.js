@@ -187,13 +187,21 @@ var commandBarFuzzyScore = function(query, item, title, url) {
 };
 
 // The site row for a one-word query that is the name of a page's site with a typo, from the
-// best page whose site matches, or null. `host` on the row names the site.
+// best page whose site matches, or null. `host` on the row names the site. Only a page you use
+// counts: an open tab, a bookmark, or a page you typed or visited a few times. Otherwise a real
+// search such as "reach" would open react.dev, visited once.
+var COMMAND_BAR_TYPO_SITE_VISITS = 3;
 var commandBarMisspeltSite = function(text, candidates) {
 	var word = text.toLowerCase();
 	if (/\s/.test(word)) {
 		return null;
 	}
 	for (var i = 0; i < candidates.length; i++) {
+		var features = candidates[i].features;
+		if (!features.tab && !features.bookmark && !features.typed &&
+			features.frequency < rankFrequency(COMMAND_BAR_TYPO_SITE_VISITS)) {
+			continue;
+		}
 		var host = commandBarHost(candidates[i].url);
 		var names = host.split(".").slice(0, -1);
 		if (names.length && commandBarFuzzyWord(word, names)) {
@@ -223,6 +231,7 @@ var COMMAND_BAR_SEARCHING_SUGGESTIONS = 5;
 var COMMAND_BAR_SUGGEST_TIMEOUT_MS = 1000;
 var COMMAND_BAR_MAX_SUGGESTION_SETS = 200;
 var commandBarSuggestions = new Map();   // lower-case query -> suggestions
+var commandBarSuggestAbort = null;       // cancels the request for the text typed before
 var commandBarSuggestEnabled = true;     // chrome.storage.local `searchSuggestions`
 chrome.storage.local.get("searchSuggestions", function(result) {
 	commandBarSuggestEnabled = !result || result.searchSuggestions !== false;
@@ -247,7 +256,12 @@ var commandBarFetchSuggestions = async function(text) {
 	if (commandBarSuggestions.has(key)) {
 		return commandBarSuggestions.get(key);
 	}
+	// A newer keystroke makes the request for the older text useless, so it stops.
+	if (commandBarSuggestAbort) {
+		commandBarSuggestAbort.abort();
+	}
 	var controller = typeof AbortController === "function" ? new AbortController() : null;
+	commandBarSuggestAbort = controller;
 	var timer = controller ? setTimeout(function() { controller.abort(); }, COMMAND_BAR_SUGGEST_TIMEOUT_MS) : null;
 	try {
 		var response = await fetch(COMMAND_BAR_SUGGEST_URL + encodeURIComponent(text),
@@ -261,11 +275,17 @@ var commandBarFetchSuggestions = async function(text) {
 		}
 		return list;
 	} catch (e) {
-		commandBarTrace("no search suggestions for \"" + text + "\": " + e.message);
+		// A request stopped for a newer one is not a failure.
+		if (!controller || controller === commandBarSuggestAbort) {
+			commandBarTrace("no search suggestions for \"" + text + "\": " + e.message);
+		}
 		return [];
 	} finally {
 		if (timer) {
 			clearTimeout(timer);
+		}
+		if (commandBarSuggestAbort === controller) {
+			commandBarSuggestAbort = null;
 		}
 	}
 };
@@ -776,23 +796,27 @@ var commandBarSwitched = function(tabId) {
 };
 
 // The rows of an empty bar, as in Arc: the tabs you were on most lately, newest first, then the
-// top sites to fill the list. The tab the bar opened over is where you already are.
+// top sites to fill the list. Only the tabs Ctrl+Tab offers count, so a tab Chrome restored and
+// you have not looked at yet stays out. The tab the bar opened over is where you already are.
 var commandBarEmptyRows = async function() {
-	var found = await Promise.all([chrome.tabs.query({ windowType: "normal" }), chrome.topSites.get()]);
 	var hereTabId = commandBarTarget ? commandBarTarget.tabId : null;
 	var incognito = Boolean(commandBarTarget && commandBarTarget.incognito);
-	var order = typeof mru === "undefined" ? [] : mru;
-	var tabs = found[0].filter(function(tab) {
-		return tab.id !== hereTabId && Boolean(tab.incognito) === incognito && order.indexOf(tab.id) !== -1 &&
-			tab.url && !/^javascript:/i.test(tab.url);
+	var order = new Map((typeof mru === "undefined" ? [] : mru).map(function(id, index) { return [id, index]; }));
+	var visited = typeof visitedTabs === "undefined" ? null : visitedTabs;
+	var tabs = (await chrome.tabs.query({ windowType: "normal" })).filter(function(tab) {
+		return tab.id !== hereTabId && Boolean(tab.incognito) === incognito && order.has(tab.id) &&
+			(!visited || visited[tab.id]) && tab.url && !/^javascript:/i.test(tab.url);
 	});
-	tabs.sort(function(a, b) { return order.indexOf(a.id) - order.indexOf(b.id); });
+	tabs.sort(function(a, b) { return order.get(a.id) - order.get(b.id); });
 	var rows = tabs.slice(0, COMMAND_BAR_TOP_SITES).map(function(tab) {
 		return { kind: "tab", title: tab.title || commandBarDisplayUrl(tab.url), detail: commandBarDisplayUrl(tab.url),
 			hint: COMMAND_BAR_HINTS.tab, url: tab.url, tabId: tab.id };
 	});
+	if (rows.length >= COMMAND_BAR_TOP_SITES) {
+		return rows;
+	}
 	var shown = new Set(rows.map(function(row) { return commandBarUrlKey(row.url); }));
-	found[1].forEach(function(site) {
+	(await chrome.topSites.get()).forEach(function(site) {
 		if (rows.length < COMMAND_BAR_TOP_SITES && !shown.has(commandBarUrlKey(site.url))) {
 			rows.push({ kind: "top", title: site.title || commandBarDisplayUrl(site.url),
 				detail: commandBarDisplayUrl(site.url), hint: "", url: site.url });
@@ -948,17 +972,30 @@ var commandBarQuery = async function(message) {
 	commandBarTrace("answered \"" + query + "\" with " + results.length + " rows (" +
 		results.map(function(result) { return result.kind; }).join(" ") + "), " +
 		commandBarClosedCount + " closed tabs, in " + (Date.now() - startedAt) + " ms");
-	// One refresh carries the favicons and the suggestions. It adds rows only at the end, so the
-	// row you have selected stays where it is.
-	var later = await Promise.all([commandBarAddFavicons(results),
-		wantsSuggestions ? commandBarFetchSuggestions(query.trim()) : Promise.resolve([])]);
-	if (message.seq !== commandBarLatestSeq) {
-		return;
-	}
-	var more = commandBarAddSuggestions(query, results, later[1]);
-	if (later[0] || more.length > results.length) {
-		sendToNativeHost(Object.assign({}, reply, { results: more, refresh: true }));
-	}
+	// The favicons and the suggestions each send a refresh when they arrive, so neither waits
+	// for the other. A refresh carries every favicon and suggestion so far, and adds rows only at
+	// the end. So the row you have selected stays where it is, and a later refresh never has fewer
+	// rows than an earlier one.
+	var suggestions = [];
+	var refresh = function() {
+		if (message.seq === commandBarLatestSeq) {
+			sendToNativeHost(Object.assign({}, reply,
+				{ results: commandBarAddSuggestions(query, results, suggestions), refresh: true }));
+		}
+	};
+	await Promise.all([
+		commandBarAddFavicons(results).then(function(added) {
+			if (added) {
+				refresh();
+			}
+		}),
+		wantsSuggestions ? commandBarFetchSuggestions(query.trim()).then(function(list) {
+			suggestions = list;
+			if (commandBarAddSuggestions(query, results, list).length > results.length) {
+				refresh();
+			}
+		}) : null
+	]);
 };
 
 // Remove a row, as Shift+Delete does in Chrome's address bar: a page leaves the history and the
