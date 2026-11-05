@@ -84,6 +84,16 @@ littleArcLinksEl.addEventListener("change", function() {
   chrome.storage.local.set({ littleArcForLinks: littleArcLinksEl.checked });
 });
 
+// Search suggestions in the command bar (read by commandbar.js in the service worker). On
+// unless turned off.
+var searchSuggestionsEl = document.getElementById("search-suggestions");
+chrome.storage.local.get("searchSuggestions", function(data) {
+  searchSuggestionsEl.checked = data.searchSuggestions !== false;
+});
+searchSuggestionsEl.addEventListener("change", function() {
+  chrome.storage.local.set({ searchSuggestions: searchSuggestionsEl.checked });
+});
+
 chrome.runtime.sendMessage({ action: "get_version_info" }, function(info) {
   if (chrome.runtime.lastError || !info) return;
 

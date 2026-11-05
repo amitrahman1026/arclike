@@ -9,7 +9,7 @@ Arc-style tab switching and a command bar for Chrome on macOS and Windows. A for
 | macOS | Windows | Action |
 |-------|---------|--------|
 | **Ctrl+Tab** | **Ctrl+Tab** | Switch between the tabs you visited or opened recently. Release Ctrl to switch, press Esc to cancel. |
-| **Cmd+T** | **Ctrl+T** | Command bar: open tabs, history, bookmarks and commands. Opens the result in a new tab. |
+| **Cmd+T** | **Ctrl+T** | Command bar: open tabs, history, bookmarks, commands and search suggestions. Opens the result in a new tab. |
 | **Cmd+L** | **Ctrl+L** | Command bar. Opens the result in the current tab. |
 | **Shift+Fn+Delete** | **Shift+Delete** | In the command bar, remove the selected page from history, or a past search. The **×** on the row does the same. |
 | **Cmd+Shift+C** | **Alt+Shift+C** | Copy the URL of the current tab. |

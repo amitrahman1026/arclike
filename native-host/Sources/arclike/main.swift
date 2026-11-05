@@ -7,7 +7,7 @@ import Sparkle
 import UserNotifications
 import ImageIO
 
-let APP_VERSION = "0.4.0"
+let APP_VERSION = "0.5.0"
 
 // MARK: - Branding
 
@@ -2048,12 +2048,17 @@ final class CommandBarState: NSObject, ObservableObject, NSTextFieldDelegate, NS
         }
     }
 
-    /// Rows for query `seq`. A `refresh` carries the same rows again with their favicons.
+    /// Rows for query `seq`. A `refresh` carries the same rows again with their favicons, and
+    /// can add search suggestions after them. The selection stays on the same row.
     func receiveResults(seq: Int, items: [CommandBarItem], autocomplete: String, tip: CommandBarTip?, refresh: Bool) {
         guard isVisible, seq == querySeq else { return }
         if refresh {
-            if items.count == self.items.count {
+            if items.count >= self.items.count {
+                let grew = items.count > self.items.count
                 self.items = items
+                if grew {
+                    resizePanel()
+                }
             }
             return
         }

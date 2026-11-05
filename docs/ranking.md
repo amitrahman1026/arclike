@@ -1,6 +1,8 @@
 # How the command bar ranks results
 
-The command bar shows up to 8 rows, and Enter opens the first row. The rows come from open tabs, recently closed tabs, bookmarks, the last 90 days of history, and commands.
+The command bar shows up to 8 rows, and Enter opens the first row. The rows come from open tabs, recently closed tabs, bookmarks, the last 90 days of history, commands, and Google's search suggestions.
+
+An empty bar lists the tabs you were on most lately, newest first, as in Arc. Chrome's top sites fill the rest of the 6 rows.
 
 The ranking copies the design of Arc's command bar. Each page gets a few features, each a number from 0 to 1. A score combines them, and the best page goes first if it is good enough. Otherwise the search row goes first. The bar also remembers what you chose for what you typed.
 
@@ -51,20 +53,23 @@ Recency has a small weight because Arc's data showed that how often you visit a 
 
 The bar checks these in order. The first that applies chooses the first row. A page never leads for a query of one letter.
 
-When the query ends in a space, the search row leads, as in Arc. For example, `youtube` gives your YouTube tab, and `youtube ` searches for youtube. The field does not complete a query that ends in a space.
+When the query ends in a space, the bar lists only searches, as in Arc: the search row, one past search, and search suggestions. For example, `youtube` gives your YouTube tab, and `youtube ` searches for youtube. The field does not complete a query that ends in a space.
 
-1. The query is an address, such as `github.com/me`. The first row opens it, or switches to a tab that has it open.
+1. The query is an address, such as `github.com/me`. The first row opens it in a new tab, even when a tab has it open, as in Arc. Thus you can open a page a second time. The tab comes lower in the list.
 2. The best page leads when all of these are true:
    - Its score is 0.5 or more.
    - The query starts its site's name or a word of its title, or you chose it for this text before.
    - You did not choose to search this exact text more strongly before.
 3. A tab that you closed in the last 10 minutes leads when the query starts its site's name or its title.
-4. A command whose name starts with the query leads when the query has 3 or more letters. For example, `set` gives Settings.
-5. Otherwise, the search row leads.
+4. The query is one word that is a site's name with a typo, and the bar found no good match without typos. The site leads, in a new tab. For example, `godbold` gives `godbolt.org/`. A typo of any other word leaves the search row first.
+5. A command whose name starts with the query leads when the query has 3 or more letters. For example, `set` gives Settings.
+6. Otherwise, the search row leads.
 
 When a page from history or bookmarks leads and its site's name starts with the query, the first row is the site itself. For example, `you` gives `youtube.com/`, and the field completes the name. A tab, a closed tab, or a remembered page leads as itself.
 
 After the first row come the search row, one past search, up to 2 commands, and then the other pages by score.
+
+Search suggestions come last. They fill up to 3 of the free rows, or 5 after a space. The bar shows its rows first and adds the suggestions when Google answers, so no row moves under the selection. The bar does not ask for suggestions in incognito windows or for an address. The extension's popup has a setting to turn them off.
 
 ## Memory
 

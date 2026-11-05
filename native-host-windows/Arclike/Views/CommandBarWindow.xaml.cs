@@ -143,13 +143,14 @@ namespace Arclike.Views
             SendQuery();
         }
 
-        /// <summary>Rows for query `seq`. A `refresh` carries the same rows again with their favicons.</summary>
+        /// <summary>Rows for query `seq`. A `refresh` carries the same rows again with their favicons,
+        /// and can add search suggestions after them. The selection stays on the same row.</summary>
         public void ReceiveResults(int seq, List<CommandBarItem> items, string autocomplete, (string Id, string Text)? tip, bool refresh)
         {
             if (!_isVisible || seq != _querySeq) return;
             if (refresh)
             {
-                if (items.Count == _items.Count)
+                if (items.Count >= _items.Count)
                 {
                     _items = items;
                     RenderRows();

@@ -20,6 +20,7 @@ function load(opts = {}) {
   const windowsFocused = [];
   const created = [];            // chrome.tabs.create calls
   const searched = [];           // chrome.search.query calls
+  const fetched = [];            // search suggestion requests
   const ran = [];                // other tab, window and session calls, as [name, ...args]
   const record = (name, result) => async (...args) => { ran.push([name, ...args]); return result; };
   let state = { windows: opts.windows || [] };
@@ -106,11 +107,16 @@ function load(opts = {}) {
   const sandbox = {
     chrome,
     console: { log: opts.verbose ? console.log : () => {} },
-    fetch: async () => ({ json: async () => ({}), blob: async () => ({}),
+    // Google's search suggestions answer with opts.suggestions, as [query, [suggestions]].
+    fetch: async (url) => /suggestqueries/.test(url) ? (fetched.push(url), {
+      json: async () => { if (opts.suggestions instanceof Error) throw opts.suggestions;
+        return [decodeURIComponent(url.split('q=')[1]), opts.suggestions || []]; } }) :
+      ({ json: async () => ({}), blob: async () => ({}),
       arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer, headers: { get: () => 'image/png' } }),
     // Scripts the worker imports run in its own context, as they do in a service worker.
     importScripts: (...files) => files.forEach(f =>
       vm.runInContext(fs.readFileSync(path.join(dir, f), 'utf8'), ctx, { filename: f })),
+    AbortController, encodeURIComponent, decodeURIComponent,
     setTimeout, clearTimeout, setInterval: () => 0, clearInterval,
     Date, Math, JSON, Map, Set, Promise, Object, Array, String, Number, RegExp, Error, undefined,
     createImageBitmap: async () => ({ width: 2000, height: 1200, close: () => {} }),
@@ -126,7 +132,7 @@ function load(opts = {}) {
   vm.runInContext(fs.readFileSync(path.join(dir, 'mainsw.js'), 'utf8'), ctx, { filename: 'mainsw.js' });
 
   const h = {
-    ctx, sandbox, chrome, sent, activated, windowsFocused, created, searched, ran, state, session, local,
+    ctx, sandbox, chrome, sent, activated, windowsFocused, created, searched, fetched, ran, state, session, local,
     // Values cross a realm boundary, so objects arrive with the VM's own prototypes. Copy
     // them into this realm before any deepStrictEqual comparison.
     g: (name) => {

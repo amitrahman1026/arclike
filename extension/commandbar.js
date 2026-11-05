@@ -166,7 +166,8 @@ var commandBarFuzzyWord = function(word, tokens) {
 };
 
 // The score of a page that matches the query only with typos, or -1. It ranks below every exact
-// match and never leads the list, so a misspelled search still searches.
+// match. Only a typo of a site's name leads the list (commandBarMisspeltSite), so a misspelled
+// search still searches.
 var COMMAND_BAR_FUZZY_SCORE = 5;
 var commandBarFuzzyScore = function(query, item, title, url) {
 	var words = query.trim().toLowerCase().split(/\s+/);
@@ -185,6 +186,24 @@ var commandBarFuzzyScore = function(query, item, title, url) {
 	return COMMAND_BAR_FUZZY_SCORE;
 };
 
+// The site row for a one-word query that is the name of a page's site with a typo, from the
+// best page whose site matches, or null. `host` on the row names the site.
+var commandBarMisspeltSite = function(text, candidates) {
+	var word = text.toLowerCase();
+	if (/\s/.test(word)) {
+		return null;
+	}
+	for (var i = 0; i < candidates.length; i++) {
+		var host = commandBarHost(candidates[i].url);
+		var names = host.split(".").slice(0, -1);
+		if (names.length && commandBarFuzzyWord(word, names)) {
+			return Object.assign(commandBarSiteRow(candidates[i].url), { host: host },
+				candidates[i].kind === "history" ? { removable: true, source: candidates[i].url } : {});
+		}
+	}
+	return null;
+};
+
 // A tab closed this recently is what you are most likely after, so it comes before every other
 // page that matches, whatever their titles score.
 var COMMAND_BAR_FRESH_CLOSED_MINUTES = 10;
@@ -192,6 +211,84 @@ var COMMAND_BAR_FRESH_CLOSED_MINUTES = 10;
 var commandBarFreshlyClosed = function(candidate) {
 	return candidate.kind === "closed" &&
 		Date.now() / 1000 - (candidate.lastModified || 0) < COMMAND_BAR_FRESH_CLOSED_MINUTES * 60;
+};
+
+// Search suggestions from Google, as Chrome's address bar and Arc show them. They come after the
+// rows the bar already shows and fill only the free places, so no row moves when they arrive.
+// After a space, when the bar lists only searches, more of them show. They are not asked for in
+// incognito windows, for an address, or when the setting is off.
+var COMMAND_BAR_SUGGEST_URL = "https://suggestqueries.google.com/complete/search?client=firefox&ie=utf-8&oe=utf-8&q=";
+var COMMAND_BAR_SUGGESTIONS = 3;
+var COMMAND_BAR_SEARCHING_SUGGESTIONS = 5;
+var COMMAND_BAR_SUGGEST_TIMEOUT_MS = 1000;
+var COMMAND_BAR_MAX_SUGGESTION_SETS = 200;
+var commandBarSuggestions = new Map();   // lower-case query -> suggestions
+var commandBarSuggestEnabled = true;     // chrome.storage.local `searchSuggestions`
+chrome.storage.local.get("searchSuggestions", function(result) {
+	commandBarSuggestEnabled = !result || result.searchSuggestions !== false;
+});
+chrome.storage.onChanged.addListener(function(changes, area) {
+	if (area === "local" && changes.searchSuggestions) {
+		commandBarSuggestEnabled = changes.searchSuggestions.newValue !== false;
+	}
+});
+
+// Whether to ask for suggestions for `query`, given the rows it has now.
+var commandBarWantsSuggestions = function(query, results) {
+	var text = query.trim();
+	return commandBarSuggestEnabled && Boolean(text) && results.length < COMMAND_BAR_MAX_RESULTS &&
+		Boolean(commandBarTarget) && !commandBarTarget.pick && !commandBarTarget.incognito && !commandBarTypedUrl(text);
+};
+
+// The suggestions for `text`, or [] when Google does not answer in time. Kept for the next time
+// the same text is typed, such as after a Backspace.
+var commandBarFetchSuggestions = async function(text) {
+	var key = text.toLowerCase();
+	if (commandBarSuggestions.has(key)) {
+		return commandBarSuggestions.get(key);
+	}
+	var controller = typeof AbortController === "function" ? new AbortController() : null;
+	var timer = controller ? setTimeout(function() { controller.abort(); }, COMMAND_BAR_SUGGEST_TIMEOUT_MS) : null;
+	try {
+		var response = await fetch(COMMAND_BAR_SUGGEST_URL + encodeURIComponent(text),
+			{ credentials: "omit", signal: controller ? controller.signal : undefined });
+		var data = await response.json();
+		var list = Array.isArray(data) && Array.isArray(data[1]) ?
+			data[1].filter(function(item) { return typeof item === "string" && item.trim(); }) : [];
+		commandBarSuggestions.set(key, list);
+		if (commandBarSuggestions.size > COMMAND_BAR_MAX_SUGGESTION_SETS) {
+			commandBarSuggestions.delete(commandBarSuggestions.keys().next().value);
+		}
+		return list;
+	} catch (e) {
+		commandBarTrace("no search suggestions for \"" + text + "\": " + e.message);
+		return [];
+	} finally {
+		if (timer) {
+			clearTimeout(timer);
+		}
+	}
+};
+
+// `results` with search rows for `suggestions` added at the end, in the free places. A
+// suggestion that a search row already shows is left out.
+var commandBarAddSuggestions = function(query, results, suggestions) {
+	var shown = new Set(results.filter(function(row) { return row.kind === "search"; }).map(function(row) {
+		return row.text.trim().toLowerCase();
+	}));
+	var limit = /\s$/.test(query) ? COMMAND_BAR_SEARCHING_SUGGESTIONS : COMMAND_BAR_SUGGESTIONS;
+	var rows = results.slice();
+	for (var i = 0; i < suggestions.length && limit > 0 && rows.length < COMMAND_BAR_MAX_RESULTS; i++) {
+		var text = suggestions[i].trim();
+		if (!shown.has(text.toLowerCase())) {
+			shown.add(text.toLowerCase());
+			var row = commandBarSearchRow(text);
+			row.fill = text;
+			rows.push(row);
+			limit--;
+		}
+	}
+	return rows;
 };
 
 var commandBarSearchRow = function(text) {
@@ -502,10 +599,9 @@ var commandBarRank = function(query, sources) {
 	var results = [];
 	var typedUrl = commandBarTypedUrl(text);
 	if (typedUrl) {
-		// The typed address itself first, unless a tab already has it open.
-		var same = byKey.get(commandBarUrlKey(typedUrl));
-		var lead = same && same.kind === "tab" ? same : commandBarDefaultRow(text);
-		results.push(lead);
+		// The typed address itself first, even when a tab has it open, as in Arc: typing a whole
+		// address opens it again. The tab is still listed below.
+		results.push(commandBarDefaultRow(text));
 		if (!COMMAND_BAR_SCHEMES.test(text)) {
 			results.push(commandBarSearchRow(text));
 		}
@@ -519,8 +615,16 @@ var commandBarRank = function(query, sources) {
 		var strong = best && !searching && text.length >= 2 && recalled.searchHere <= best.features.remembered &&
 			((named && best.score >= RANK_LEAD) ||
 				(commandBarFreshlyClosed(best) && Math.max(best.features.host, best.features.title) >= 1));
+		// A typo of a site's name leads with the site, as in Arc: "godbold" opens godbolt.org in a
+		// new tab. A typo of any other word leaves the search row first.
+		var misspelt = !strong && !searching && fuzzy && recalled.searchHere === 0 ?
+			commandBarMisspeltSite(text, candidates) : null;
+		if (misspelt) {
+			results.push(misspelt);
+			candidates = candidates.filter(function(c) { return commandBarHost(c.url) !== misspelt.host; });
+		}
 		// A command whose name starts with the query leads when no page does: "set" is Settings.
-		if (!strong && !searching && commands.length && commands[0].match >= COMMAND_BAR_STRONG_COMMAND_MATCH &&
+		if (!strong && !misspelt && !searching && commands.length && commands[0].match >= COMMAND_BAR_STRONG_COMMAND_MATCH &&
 			text.length >= 3) {
 			results.push(commands.shift());
 		}
@@ -540,6 +644,11 @@ var commandBarRank = function(query, sources) {
 		recalled.searches.slice(0, COMMAND_BAR_PAST_SEARCHES).forEach(function(search) {
 			results.push(Object.assign(commandBarSearchRow(search.text), { removable: true }));
 		});
+		// After a space the bar lists only searches, as in Arc. Search suggestions follow them.
+		if (searching) {
+			commands = [];
+			candidates = [];
+		}
 	}
 	// Other commands come right after the typed text's own rows, at most two of them.
 	commands.slice(0, 2).forEach(function(command) {
@@ -666,21 +775,38 @@ var commandBarSwitched = function(tabId) {
 	return index > 0 ? 1 / index : 0;
 };
 
+// The rows of an empty bar, as in Arc: the tabs you were on most lately, newest first, then the
+// top sites to fill the list. The tab the bar opened over is where you already are.
+var commandBarEmptyRows = async function() {
+	var found = await Promise.all([chrome.tabs.query({ windowType: "normal" }), chrome.topSites.get()]);
+	var hereTabId = commandBarTarget ? commandBarTarget.tabId : null;
+	var incognito = Boolean(commandBarTarget && commandBarTarget.incognito);
+	var order = typeof mru === "undefined" ? [] : mru;
+	var tabs = found[0].filter(function(tab) {
+		return tab.id !== hereTabId && Boolean(tab.incognito) === incognito && order.indexOf(tab.id) !== -1 &&
+			tab.url && !/^javascript:/i.test(tab.url);
+	});
+	tabs.sort(function(a, b) { return order.indexOf(a.id) - order.indexOf(b.id); });
+	var rows = tabs.slice(0, COMMAND_BAR_TOP_SITES).map(function(tab) {
+		return { kind: "tab", title: tab.title || commandBarDisplayUrl(tab.url), detail: commandBarDisplayUrl(tab.url),
+			hint: COMMAND_BAR_HINTS.tab, url: tab.url, tabId: tab.id };
+	});
+	var shown = new Set(rows.map(function(row) { return commandBarUrlKey(row.url); }));
+	found[1].forEach(function(site) {
+		if (rows.length < COMMAND_BAR_TOP_SITES && !shown.has(commandBarUrlKey(site.url))) {
+			rows.push({ kind: "top", title: site.title || commandBarDisplayUrl(site.url),
+				detail: commandBarDisplayUrl(site.url), hint: "", url: site.url });
+		}
+	});
+	return rows;
+};
+
 var commandBarSearch = async function(query) {
 	var results;
 	if (commandBarTarget && commandBarTarget.pick) {
 		results = await commandBarPickResults(query, commandBarTarget);
 	} else if (!query.trim()) {
-		var sites = await chrome.topSites.get();
-		results = sites.slice(0, COMMAND_BAR_TOP_SITES).map(function(site) {
-			return {
-				kind: "top",
-				title: site.title || commandBarDisplayUrl(site.url),
-				detail: commandBarDisplayUrl(site.url),
-				hint: "",
-				url: site.url
-			};
-		});
+		results = await commandBarEmptyRows();
 	} else {
 		// Right after the worker starts, give the history a moment to load, once. After that
 		// the bar is answered with whatever is loaded rather than kept waiting.
@@ -806,6 +932,13 @@ var commandBarQuery = async function(message) {
 	commandBarLastQuery = query;
 	var picking = Boolean(commandBarTarget && commandBarTarget.pick);
 	var autocomplete = query.trim() && !picking ? commandBarAutocomplete(query, results[0]) : "";
+	// Suggestions already fetched for this text go out with the rows. Others follow them.
+	var wantsSuggestions = commandBarWantsSuggestions(query, results);
+	var suggestKey = query.trim().toLowerCase();
+	if (wantsSuggestions && commandBarSuggestions.has(suggestKey)) {
+		results = commandBarAddSuggestions(query, results, commandBarSuggestions.get(suggestKey));
+		wantsSuggestions = false;
+	}
 	var reply = { action: "command_bar_results", seq: message.seq, results: results, autocomplete: autocomplete };
 	// The tip shows only while nothing is typed, below the rows.
 	if (!query.trim() && !picking && commandBarTip) {
@@ -815,8 +948,16 @@ var commandBarQuery = async function(message) {
 	commandBarTrace("answered \"" + query + "\" with " + results.length + " rows (" +
 		results.map(function(result) { return result.kind; }).join(" ") + "), " +
 		commandBarClosedCount + " closed tabs, in " + (Date.now() - startedAt) + " ms");
-	if (await commandBarAddFavicons(results) && message.seq === commandBarLatestSeq) {
-		sendToNativeHost(Object.assign({}, reply, { refresh: true }));
+	// One refresh carries the favicons and the suggestions. It adds rows only at the end, so the
+	// row you have selected stays where it is.
+	var later = await Promise.all([commandBarAddFavicons(results),
+		wantsSuggestions ? commandBarFetchSuggestions(query.trim()) : Promise.resolve([])]);
+	if (message.seq !== commandBarLatestSeq) {
+		return;
+	}
+	var more = commandBarAddSuggestions(query, results, later[1]);
+	if (later[0] || more.length > results.length) {
+		sendToNativeHost(Object.assign({}, reply, { results: more, refresh: true }));
 	}
 };
 

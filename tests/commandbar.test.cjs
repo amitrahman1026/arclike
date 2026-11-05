@@ -63,15 +63,21 @@ test('a profile without the focused window stays quiet', async () => {
   assert.strictEqual(h.lastSent('show_command_bar'), undefined);
 });
 
-test('an empty bar lists the top sites with their favicons', async () => {
+test('an empty bar lists the tabs you were on lately, then the top sites, with their favicons', async () => {
   const h = browser({ topSites: [
     { url: 'https://www.netflix.com/browse', title: 'Home - Netflix' },
     { url: 'https://youtube.com/', title: 'YouTube' },
   ] });
+  h.set('mru', [10, 12, 11]);
+  await h.call(`commandBarOpen("new_tab")`);
   const results = await query(h, '');
-  assert.deepStrictEqual(kinds(results), ['top:https://www.netflix.com/browse', 'top:https://youtube.com/']);
-  assert.strictEqual(results[1].detail, 'youtube.com');
+  assert.deepStrictEqual(kinds(results), ['tab:https://leetcode.com/problemset/',
+    'tab:https://www.netflix.com/browse', 'top:https://youtube.com/']);
+  assert.strictEqual(results[0].tabId, 12);
+  assert.strictEqual(results[0].hint, 'Switch to Tab');
+  assert.strictEqual(results[2].detail, 'youtube.com');
   assert.strictEqual(results[0].favicon, 'data:image/png;base64,AQID');
+  assert.strictEqual(h.fetched.length, 0, 'an empty bar asks for no suggestions');
 });
 
 test('a tab whose site starts with the query comes before the search row', async () => {
@@ -134,11 +140,13 @@ test('an address leads with opening it, then searching for it', async () => {
   assert.deepStrictEqual(kinds(results), ['url:https://example.org/page', 'search:example.org/page']);
 });
 
-test('an address that is already open in a tab switches to it', async () => {
+test('an address that is already open in a tab opens again, with the tab listed below', async () => {
   const h = browser();
   await h.call(`commandBarOpen("new_tab")`);
   const results = await query(h, 'leetcode.com/problemset');
-  assert.strictEqual(results[0].tabId, 12);
+  assert.deepStrictEqual(kinds(results), ['url:https://leetcode.com/problemset',
+    'search:leetcode.com/problemset', 'tab:https://leetcode.com/problemset/']);
+  assert.strictEqual(h.fetched.length, 0, 'an address asks for no suggestions');
 });
 
 test('history visited after the bar first loaded is found', async () => {
@@ -189,7 +197,7 @@ test('a space after the words leads with the search row, even over an open tab, 
   const h = browser();
   await h.call(`commandBarOpen("new_tab")`);
   assert.strictEqual((await query(h, 'netflix'))[0].kind, 'tab');
-  assert.deepStrictEqual(kinds(await query(h, 'netflix ')).slice(0, 2), ['search:netflix', 'tab:https://www.netflix.com/browse']);
+  assert.deepStrictEqual(kinds(await query(h, 'netflix ')), ['search:netflix']);
   assert.strictEqual(h.lastSent('command_bar_results').autocomplete, '');
   assert.strictEqual((await query(h, 'settings '))[0].kind, 'search');
 });
@@ -354,11 +362,73 @@ test('of two tabs that match alike, the one switched to more lately ranks first'
   assert.deepStrictEqual((await query(h, 'notes')).filter(r => r.kind === 'tab').map(r => r.tabId), [2, 3]);
 });
 
-test('a typo still finds the page, below the search row', async () => {
-  const h = browser({ history: [{ url: 'https://www.youtube.com/', title: 'YouTube', visitCount: 30, lastVisitTime: Date.now() }] });
+test('a typo of a site name leads with the site, in a new tab, then the search row', async () => {
+  const h = browser({ history: [{ url: 'https://www.youtube.com/watch?v=1', title: 'A video', visitCount: 30, lastVisitTime: Date.now() }] });
   await h.call(`commandBarOpen("new_tab")`);
-  assert.deepStrictEqual(kinds(await query(h, 'youtbue')), ['search:youtbue', 'history:https://www.youtube.com/']);
-  assert.deepStrictEqual(kinds(await query(h, 'netlfix')).slice(0, 2), ['search:netlfix', 'tab:https://www.netflix.com/browse']);
+  const results = await query(h, 'youtbue');
+  assert.deepStrictEqual(kinds(results), ['url:https://www.youtube.com/', 'search:youtbue']);
+  assert.strictEqual(results[0].title, 'youtube.com');
+  assert.strictEqual(results[0].removable, true);
+  assert.deepStrictEqual(kinds(await query(h, 'netlfix')), ['url:https://www.netflix.com/', 'search:netlfix']);
+});
+
+test('a typo of a word in a title still searches first', async () => {
+  const h = browser({ history: [{ url: 'https://example.com/a', title: 'Cardamom recipes', visitCount: 3, lastVisitTime: Date.now() }] });
+  await h.call(`commandBarOpen("new_tab")`);
+  assert.deepStrictEqual(kinds(await query(h, 'cardamon')), ['search:cardamon', 'history:https://example.com/a']);
+});
+
+test('search suggestions follow the rows, in the places left', async () => {
+  const h = browser({ suggestions: ['netf', 'netflix', 'netflix stock', 'netflix shows', 'netflix login'] });
+  await h.call(`commandBarOpen("new_tab")`);
+  await h.call(`commandBarQuery({ query: "netf", seq: 3 })`);
+  const replies = h.sent.filter(m => m.action === 'command_bar_results').map(m => JSON.parse(JSON.stringify(m)));
+  assert.strictEqual(replies.length, 2);
+  assert.deepStrictEqual(kinds(replies[0].results), ['tab:https://www.netflix.com/browse', 'search:netf']);
+  assert.strictEqual(replies[1].refresh, true);
+  assert.deepStrictEqual(kinds(replies[1].results), ['tab:https://www.netflix.com/browse', 'search:netf',
+    'search:netflix', 'search:netflix stock', 'search:netflix shows']);
+  assert.strictEqual(replies[1].results[2].fill, 'netflix');
+  assert.strictEqual(h.fetched.length, 1);
+  assert.match(h.fetched[0], /suggestqueries\.google\.com.*q=netf$/);
+  // The same text again uses the suggestions it has, in the first answer.
+  h.call('commandBarLatestSeq = 0');
+  const again = await query(h, 'netf');
+  assert.strictEqual(again.length, 5);
+  assert.strictEqual(h.fetched.length, 1);
+});
+
+test('after a space the bar lists only searches, with more suggestions', async () => {
+  const h = browser({ suggestions: ['netflix', 'netflix stock', 'netflix shows', 'netflix login', 'netflix price', 'netflix jobs'] });
+  await h.call(`commandBarOpen("new_tab")`);
+  await h.call(`commandBarQuery({ query: "netflix ", seq: 3 })`);
+  const refresh = JSON.parse(JSON.stringify(h.lastSent('command_bar_results')));
+  assert.deepStrictEqual(kinds(refresh.results), ['search:netflix', 'search:netflix stock', 'search:netflix shows',
+    'search:netflix login', 'search:netflix price', 'search:netflix jobs']);
+});
+
+test('no suggestions are asked for in incognito or with the setting off', async () => {
+  const incognito = load({ suggestions: ['netflix'], windows: [Object.assign(win(1, [
+    tab(10, { active: true, incognito: true }),
+  ], true), { incognito: true })] });
+  await incognito.call(`commandBarOpen("new_tab")`);
+  await query(incognito, 'netf');
+  assert.strictEqual(incognito.fetched.length, 0);
+
+  const off = browser({ suggestions: ['netflix'] });
+  off.call('commandBarSuggestEnabled = false');
+  await off.call(`commandBarOpen("new_tab")`);
+  assert.deepStrictEqual(kinds(await query(off, 'netf')), ['tab:https://www.netflix.com/browse', 'search:netf']);
+  assert.strictEqual(off.fetched.length, 0);
+});
+
+test('suggestions that fail leave the rows as they are', async () => {
+  const h = browser({ suggestions: new Error('offline') });
+  await h.call(`commandBarOpen("new_tab")`);
+  await h.call(`commandBarQuery({ query: "zebra", seq: 3 })`);
+  const replies = h.sent.filter(m => m.action === 'command_bar_results');
+  assert.strictEqual(replies.length, 1);
+  assert.deepStrictEqual(kinds(replies[0].results), ['search:zebra']);
 });
 
 test('short words and unrelated words do not match by typo', async () => {
