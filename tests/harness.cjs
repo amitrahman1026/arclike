@@ -90,7 +90,7 @@ function load(opts = {}) {
       update: record('tabGroups.update'),
     },
     sessions: { restore: record('sessions.restore'), MAX_SESSION_RESULTS: 25,
-      getRecentlyClosed: async () => opts.closed || [] },
+      getRecentlyClosed: async () => opts.closed || [], onChanged: makeEvent() },
     storage: {
       local: { get: (k, cb) => cb && cb(opts.storage || {}),
         set: (items) => { Object.assign(local, JSON.parse(JSON.stringify(items))); } },

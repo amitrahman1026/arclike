@@ -92,6 +92,21 @@ test('a link is also taken when Chrome came to the front a moment before the tab
   assert.strictEqual(plain(h.ran).length, 1);
 });
 
+test('a tab reopened with Cmd+Shift+T right after Chrome comes to the front stays', async () => {
+  const opts = { storage: { littleArcForLinks: true },
+    closed: [{ lastModified: 1000, tab: { url: 'https://chatgpt.com/c/1', sessionId: 's1' } }] };
+  const h = browser(opts);
+  await settle();
+  // Chrome drops the tab from its list before it reports the reopened tab.
+  opts.closed = [];
+  h.chrome.sessions.onChanged.emit();
+  h.chrome.windows.onFocusChanged.emit(-1);
+  h.chrome.windows.onFocusChanged.emit(1);
+  h.chrome.tabs.onCreated.emit({ id: 50, windowId: 1, url: 'https://chatgpt.com/c/1' });
+  await settle();
+  assert.deepStrictEqual(plain(h.ran), []);
+});
+
 test('tabs opened inside Chrome stay where they are', async () => {
   const cases = [
     ['option off', {}, (h) => h.chrome.windows.onFocusChanged.emit(-1), { pendingUrl: 'https://example.org/' }],

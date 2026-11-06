@@ -1066,7 +1066,7 @@ var commandBarChoose = async function(message) {
 			await chrome.windows.update(tab.windowId, { focused: true });
 			await chrome.tabs.update(tab.id, { active: true });
 		} else if (item.kind === "closed") {
-			await chrome.sessions.restore(item.sessionId);
+			await commandBarReopen(item.sessionId, target);
 		} else if (item.kind === "search") {
 			// A search with disposition NEW_TAB opens in the window Chrome thinks is current. When
 			// the bar hides, macOS can give the focus to another window, such as the one a tab was
@@ -1087,6 +1087,21 @@ var commandBarChoose = async function(message) {
 	} catch (e) {
 		log("CommandBar::Could not open the choice: " + e.message);
 	}
+};
+
+// Reopen a closed tab where the bar is, next to the tab it opened over. Chrome reopens a tab in
+// the window it closed in, which can be a window on another screen. A Little Arc holds one tab,
+// so a tab reopened from one stays where Chrome puts it.
+var commandBarReopen = async function(sessionId, target) {
+	var session = await chrome.sessions.restore(sessionId);
+	var back = session && session.tab;
+	if (!back || target.littleArc || back.windowId === target.windowId) {
+		return;
+	}
+	var here = target.tabId !== null ? await chrome.tabs.get(target.tabId).catch(function() { return null; }) : null;
+	await chrome.tabs.move(back.id, { windowId: target.windowId, index: here ? here.index + 1 : -1 });
+	await chrome.tabs.update(back.id, { active: true });
+	await commandBarFocusTarget(target);
 };
 
 // Give the focus back to the window the bar opened over, which macOS may have given to another

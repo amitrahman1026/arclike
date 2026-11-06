@@ -85,11 +85,48 @@ var littleArcCommandBarOpening = function() {
 	littleArcCommandBarAt = Date.now();
 };
 
+// Reopen Closed Tab (Cmd+Shift+T) right after Chrome comes to the front looks like a link from
+// another app: a new web page that no tab opened. Its address is one Chrome lists as recently
+// closed, so that tab stays. An address stays on this list after Chrome drops it from its own,
+// because Chrome can drop the reopened tab before it reports the new one.
+var LITTLE_ARC_RECENTLY_CLOSED = 50;
+var littleArcRecentlyClosed = new Map();   // address without its fragment -> when it closed (ms)
+
+var littleArcAddressKey = function(url) {
+	return (url || "").replace(/#.*$/, "");
+};
+
+var littleArcReadRecentlyClosed = async function() {
+	try {
+		var sessions = await chrome.sessions.getRecentlyClosed({ maxResults: chrome.sessions.MAX_SESSION_RESULTS || 25 });
+		sessions.forEach(function(session) {
+			var tabs = session.tab ? [session.tab] : session.window && session.window.tabs || [];
+			tabs.forEach(function(closed) {
+				if (closed.url) {
+					littleArcRecentlyClosed.set(littleArcAddressKey(closed.url), (session.lastModified || 0) * 1000);
+				}
+			});
+		});
+		if (littleArcRecentlyClosed.size > LITTLE_ARC_RECENTLY_CLOSED) {
+			var newest = Array.from(littleArcRecentlyClosed).sort(function(a, b) { return b[1] - a[1]; });
+			littleArcRecentlyClosed = new Map(newest.slice(0, LITTLE_ARC_RECENTLY_CLOSED));
+		}
+	} catch (e) {
+		log("LittleArc::Could not read recently closed tabs: " + e.message);
+	}
+};
+littleArcReadRecentlyClosed();
+chrome.sessions.onChanged.addListener(littleArcReadRecentlyClosed);
+
 // Whether a new tab looks like a link opened from another app: no tab opened it, it is a web
-// page, and Chrome was in the background or came to the front a moment ago.
+// page that was not closed lately, and Chrome was in the background or came to the front a moment
+// ago.
 var littleArcFromOtherApp = function(tab, now) {
 	var url = tab.pendingUrl || tab.url || "";
 	if (tab.openerTabId !== undefined || !/^https?:/i.test(url)) {
+		return false;
+	}
+	if (littleArcRecentlyClosed.has(littleArcAddressKey(url))) {
 		return false;
 	}
 	if (now - littleArcCommandBarAt < LITTLE_ARC_COMMAND_BAR_MS) {
@@ -106,7 +143,9 @@ chrome.tabs.onCreated.addListener(async function(tab) {
 	}
 	var fromOtherApp = littleArcFromOtherApp(tab, now);
 	littleArcTrace("tab " + tab.id + " created: opener " + tab.openerTabId + ", web page " +
-		/^https?:/i.test(tab.pendingUrl || tab.url || "") + ", Chrome in front " + littleArcChromeActive +
+		/^https?:/i.test(tab.pendingUrl || tab.url || "") + ", closed lately " +
+		littleArcRecentlyClosed.has(littleArcAddressKey(tab.pendingUrl || tab.url)) +
+		", Chrome in front " + littleArcChromeActive +
 		", " + (now - littleArcActivatedAt) + " ms since it came to the front, " +
 		(now - littleArcCommandBarAt) + " ms since the command bar -> " + (fromOtherApp ? "Little Arc" : "stays"));
 	if (!fromOtherApp) {

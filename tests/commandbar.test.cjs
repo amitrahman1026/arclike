@@ -638,6 +638,20 @@ test('a recently closed tab is found, above its history, and Enter restores it',
   assert.deepStrictEqual(plain(h.created), []);
 });
 
+test('a closed tab chosen in the bar reopens in the bar\'s window, next to its tab', async () => {
+  const h = load({
+    windows: [win(1, [tab(10, { active: true, index: 0 }), tab(11, { index: 1 })], true), win(2, [tab(20, { active: true, index: 0 })])],
+    closed: [{ lastModified: 1, tab: { sessionId: 's1', url: 'https://chatgpt.com/c/1', title: 'ChatGPT' } }],
+  });
+  h.chrome.sessions.restore = async (id) => { h.ran.push(['sessions.restore', id]); return { tab: { id: 60, windowId: 2 } }; };
+  await h.call(`commandBarOpen("new_tab")`);
+  const closed = (await query(h, 'chatgpt')).find(r => r.kind === 'closed');
+  await h.call(`commandBarChoose({ item: ${JSON.stringify(closed)}, text: "chatgpt" })`);
+  assert.deepStrictEqual(plain(h.ran), [['sessions.restore', 's1'], ['tabs.move', 60, { windowId: 1, index: 1 }]]);
+  assert.deepStrictEqual(plain(h.activated), [{ id: 60, props: { active: true } }]);
+  assert.strictEqual(plain(h.windowsFocused).pop().id, 1);
+});
+
 function splitBrowser(opts = {}) {
   return load(Object.assign({ windows: [win(1, [
     tab(10, { index: 0, active: true, groupId: -1, splitViewId: -1, title: 'Here' }),
