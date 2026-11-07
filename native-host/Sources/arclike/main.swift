@@ -7,7 +7,7 @@ import Sparkle
 import UserNotifications
 import ImageIO
 
-let APP_VERSION = "0.5.0"
+let APP_VERSION = "0.5.1"
 
 // MARK: - Branding
 
@@ -3778,8 +3778,48 @@ func setupEventTap() -> Bool {
     let runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
     CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
     CGEvent.tapEnable(tap: eventTap, enable: true)
-    
+    watchSecureInput()
+
     return true
+}
+
+// MARK: - Secure Input
+
+// While any app has Secure Input on, macOS sends no key presses to the event tap, so every
+// shortcut goes to the browser. A password field turns it on, and an app can leave it on by
+// mistake. Nothing in the tap shows this, so the leader logs each change.
+var secureInputWatched = false
+var secureInputHolder: pid_t? = nil
+
+/// The process that has Secure Input on, or nil when it is off.
+func secureInputPid() -> pid_t? {
+    guard let session = CGSessionCopyCurrentDictionary() as? [String: Any],
+          let pid = session["kCGSSessionSecureInputPID"] as? Int, pid > 0 else { return nil }
+    return pid_t(pid)
+}
+
+func checkSecureInput() {
+    let holder = secureInputPid()
+    guard holder != secureInputHolder else { return }
+    secureInputHolder = holder
+    if let pid = holder {
+        let name = NSRunningApplication(processIdentifier: pid)?.localizedName ?? "unknown app"
+        debugLog("Secure Input is on, held by \(name) (PID \(pid)). macOS sends no keys to Arclike until it is off")
+    } else {
+        debugLog("Secure Input is off")
+    }
+}
+
+/// Check when an app comes to the front, which is when a stuck holder matters, and every 10 s.
+func watchSecureInput() {
+    guard !secureInputWatched else { return }
+    secureInputWatched = true
+    checkSecureInput()
+    NSWorkspace.shared.notificationCenter.addObserver(
+        forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+    ) { _ in checkSecureInput() }
+    let timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in checkSecureInput() }
+    timer.tolerance = 5
 }
 
 // MARK: - Message Reading Thread
