@@ -3791,10 +3791,14 @@ func setupEventTap() -> Bool {
 var secureInputWatched = false
 var secureInputHolder: pid_t? = nil
 
-/// The process that has Secure Input on, or nil when it is off.
+/// The browser that has Secure Input on, or nil when no browser has. macOS applies an app's
+/// Secure Input only while that app is in front, so another app's (a chat app, a terminal at a
+/// password prompt) does not stop Arclike's shortcuts in the browser.
 func secureInputPid() -> pid_t? {
     guard let session = CGSessionCopyCurrentDictionary() as? [String: Any],
-          let pid = session["kCGSSessionSecureInputPID"] as? Int, pid > 0 else { return nil }
+          let pid = session["kCGSSessionSecureInputPID"] as? Int, pid > 0,
+          let bundleId = NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier,
+          knownBrowsers.contains(where: { $0.id == bundleId }) else { return nil }
     return pid_t(pid)
 }
 
