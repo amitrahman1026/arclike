@@ -3810,14 +3810,17 @@ func checkSecureInput() {
     }
 }
 
-/// Check when an app comes to the front, which is when a stuck holder matters, and every 10 s.
+/// Check soon after an app comes to the front, and every 10 s. During an app switch macOS can
+/// briefly report Secure Input as on and held by the new app, so the check waits for that to pass.
 func watchSecureInput() {
     guard !secureInputWatched else { return }
     secureInputWatched = true
     checkSecureInput()
     NSWorkspace.shared.notificationCenter.addObserver(
         forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
-    ) { _ in checkSecureInput() }
+    ) { _ in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { checkSecureInput() }
+    }
     let timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { _ in checkSecureInput() }
     timer.tolerance = 5
 }
